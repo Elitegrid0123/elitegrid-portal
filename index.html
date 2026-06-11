@@ -26,7 +26,7 @@ const { useState, useRef } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyA1FLbBaheQMYwRkpHkSr7zuq7Z0ZZApbMx2S52xV3Pwsphb4mFW1s6bad_GRV9xM6/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx0UzVQTSiwQLv5fcFeU0Rkxv9HeTw0O8TiZelEoo5xSZRSMRH_aZhErvy0mJy-xuX9/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -157,6 +157,15 @@ const canDo = (role, action) => {
 
 const roleLabel = (r) => r==="superadmin"||r==="Super Admin"?"Super Admin":r==="admin"||r==="Admin"?"Admin":"Contractor";
 const isSuperAdmin = (r) => r==="superadmin"||r==="Super Admin";
+
+// Format a value as currency - handles numbers and strings
+const fmtCur = (v) => {
+  if (!v && v!==0) return "-";
+  const n = parseFloat(String(v).replace(/[^0-9.-]/g,""));
+  if (isNaN(n)) return String(v);
+  return (n<0?"($"+Math.abs(n).toFixed(2)+")":"$"+n.toFixed(2));
+};
+
 const isAdmin      = (r) => r==="admin"||r==="Admin"||isSuperAdmin(r);
 
 const getVisible = (user, contractors, perms) => {
@@ -405,7 +414,7 @@ function PasswordInput({ value, onChange, onKeyDown, placeholder, style }) {
 }
 
 // ── CONTRACTOR NAV ────────────────────────────────────────
-function ContractorNav({ page, setPage, user, onLogout, onChPw }) {
+function ContractorNav({ page, setPage, user, onLogout, onChPw, notifications, onClearNotifs, onMarkRead }) {
   const tabs = [
     { id:"c-dashboard",     label:"Dashboard" },
     { id:"c-profile",       label:"My Profile" },
@@ -430,6 +439,7 @@ function ContractorNav({ page, setPage, user, onLogout, onChPw }) {
       </div>
       <div style={{ display:"flex", alignItems:"center", gap:8 }}>
         <span style={{ color:"#8AAABF", fontSize:13 }}>{user.name.split(" ")[0]}</span>
+        <NotificationBell notifications={notifications||[]} onClear={onClearNotifs} onMarkRead={onMarkRead}/>
         <button onClick={onChPw} style={{ background:"transparent", border:`1px solid ${C.blue}`, color:C.cyan, borderRadius:7, padding:"6px 12px", fontSize:12, cursor:"pointer", fontFamily:"inherit", fontWeight:600 }}>Password</button>
         <button onClick={onLogout} style={{ background:"transparent", border:"1px solid #3A5070", color:"#8AAABF", borderRadius:7, padding:"6px 12px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>Sign Out</button>
       </div>
@@ -438,7 +448,7 @@ function ContractorNav({ page, setPage, user, onLogout, onChPw }) {
 }
 
 // ── ADMIN NAV WITH GROUPED DROPDOWNS ─────────────────────
-function AdminNav({ page, setPage, user, onLogout }) {
+function AdminNav({ page, setPage, user, onLogout, notifications, onClearNotifs, onMarkRead }) {
   const [openGroup, setOpenGroup] = useState(null);
   const isSA = user.role === "superadmin";
 
@@ -450,11 +460,13 @@ function AdminNav({ page, setPage, user, onLogout }) {
       ...(isSA?[{ id:"a-roles", label:"Roles & Access" }]:[]),
     ]},
     { id:"leave", label:"Leave", items:[
-      { id:"a-leave", label:"Approvals" },
-      { id:"a-pto",   label:"PTO Management" },
+      { id:"a-leave",    label:"Approvals" },
+      { id:"a-pto",      label:"PTO Management" },
+      { id:"a-calendar", label:"Leave Calendar" },
     ]},
     { id:"finance", label:"Finance", items:[
-      { id:"a-audit",   label:"Audit Log" },
+      { id:"a-payslips", label:"Payslips" },
+      { id:"a-audit",    label:"Audit Log" },
     ]},
     { id:"comms", label:"Comms", items:[
       { id:"a-announce", label:"Announcements" },
@@ -517,6 +529,7 @@ function AdminNav({ page, setPage, user, onLogout }) {
           <div style={{ color:"#fff", fontSize:13, fontWeight:600 }}>{user.name.split(" ")[0]}</div>
           <div style={{ display:"flex", justifyContent:"flex-end", marginTop:2 }}><SBadge s={user.role}/></div>
         </div>
+        <NotificationBell notifications={notifications||[]} onClear={onClearNotifs} onMarkRead={onMarkRead}/>
         <button onClick={onLogout} style={{ background:"transparent", border:"1px solid #3A5070", color:"#8AAABF", borderRadius:7, padding:"6px 12px", fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>Sign Out</button>
       </div>
     </div>
@@ -579,7 +592,7 @@ function CDashboard({ user, contractor, leaves, setPage }) {
   const hasPhoto = !!c.photoUrl;
 
   const stats = [
-    { label:"Latest Net Pay",   value:latest?latest.net:"N/A",    sub:latest?latest.period:"No payslips yet", color:C.blue,  page:"c-payslips" },
+    { label:"Latest Net Pay",   value:latest?fmtCur(latest.net):"N/A",    sub:latest?latest.period:"No payslips yet", color:C.navy,  page:"c-payslips" },
     { label:"VL Balance",       value:`${vlBal} hrs`,              sub:`${c.vlUsed} hrs used`,                 color:C.cyan,  page:"c-pto" },
     { label:"SL Balance",       value:`${slBal} hrs`,              sub:`${c.slUsed} hrs used`,                 color:C.blueDk,page:"c-pto" },
     { label:"Pending Requests", value:pendingLeaves,               sub:"awaiting approval",                    color:C.amber, page:"c-leave" },
@@ -683,7 +696,7 @@ function CPayslips({ user }) {
         <div style={{ overflowX:"auto" }}>
           <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead><tr style={{ background:C.off }}>
-              {["Pay Period","Gross","Deductions","Adjustments","Net Pay","Status","Released",""].map(h => (
+              {["Pay Period","Gross Pay","Allowance","Deductions","Adjustments","Net Pay","Status","Released",""].map(h => (
                 <th key={h} style={{ padding:"10px 14px", textAlign:"left", fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.5px", borderBottom:`1px solid ${C.border}` }}>{h}</th>
               ))}
             </tr></thead>
@@ -693,9 +706,11 @@ function CPayslips({ user }) {
                 : payslips.map((p,i) => (
                   <tr key={i} style={{ borderBottom:`1px solid ${C.border}` }}>
                     <td style={{ padding:"12px 14px", fontWeight:600, fontSize:14 }}>{p.period}</td>
-                    <td style={{ padding:"12px 14px", fontSize:14 }}>{p.gross}</td>
-                    <td style={{ padding:"12px 14px", fontSize:14, color:C.red }}>{p.deductions}</td>
-                    <td style={{ padding:"12px 14px", fontSize:14, fontWeight:700, color:C.blue }}>{p.net}</td>
+                    <td style={{ padding:"12px 14px", fontSize:14 }}>{fmtCur(p.gross)}</td>
+                    <td style={{ padding:"12px 14px", fontSize:14 }}>{fmtCur(p.allowance)}</td>
+                    <td style={{ padding:"12px 14px", fontSize:14 }}>{fmtCur(p.deductions)}</td>
+                    <td style={{ padding:"12px 14px", fontSize:14 }}>{fmtCur(p.adjustments)}</td>
+                    <td style={{ padding:"12px 14px", fontSize:14, fontWeight:700 }}>{fmtCur(p.net)}</td>
                     <td style={{ padding:"12px 14px" }}><SBadge s={p.status}/></td>
                     <td style={{ padding:"12px 14px", fontSize:13, color:C.muted }}>{p.released}</td>
                     <td style={{ padding:"12px 14px" }}>
@@ -719,7 +734,7 @@ function CPayslips({ user }) {
               <div style={{ background:C.navy, padding:"6px 14px", borderRadius:8, fontSize:10, color:C.cyan, fontWeight:700, letterSpacing:1 }}>ELITE GRID</div>
             </div>
             <div style={{ background:C.off, borderRadius:10, padding:16, marginBottom:18 }}>
-              {[["Gross Pay",sel.gross,C.navy],["Deductions",sel.deductions,C.red],["Adjustments",sel.adjustments||"$0.00",sel.adjustments&&sel.adjustments.toString().includes("-")?C.red:C.green],["Net Pay",sel.net,C.blue]].map(([l,v,col]) => (
+              {[["Gross Pay",fmtCur(sel.gross),C.navy],["Allowance",fmtCur(sel.allowance),C.navy],["Deductions",fmtCur(sel.deductions),C.navy],["Adjustments",fmtCur(sel.adjustments),C.navy],["Net Pay",fmtCur(sel.net),C.navy]].map(([l,v,col]) => (
                 <div key={l} style={{ display:"flex", justifyContent:"space-between", padding:"9px 0", borderBottom:l!=="Net Pay"?`1px solid ${C.border}`:"none" }}>
                   <span style={{ fontSize:14, color:l==="Net Pay"?C.navy:C.muted, fontWeight:l==="Net Pay"?700:400 }}>{l}</span>
                   <span style={{ fontSize:l==="Net Pay"?18:15, fontWeight:700, color:col }}>{v}</span>
@@ -786,7 +801,7 @@ function CPTOPage({ contractor, setPage }) {
   );
 }
 
-function CLeave({ user, contractor, leaves, setLeaves, setContractors }) {
+function CLeave({ user, contractor, leaves, setLeaves, setContractors, onContractorNotify }) {
   const [lvType,setLvType]   = useState("VL");
   const [isHalf,setIsHalf]   = useState(false);
   const [start,setStart]     = useState("");
@@ -830,6 +845,7 @@ function CLeave({ user, contractor, leaves, setLeaves, setContractors }) {
         return {...ct, slPending:parseFloat((ct.slPending+hours).toFixed(2))};
       }));
       const notifMsg = !DEMO_MODE ? "Email notification sent to admin." : "(Demo) Email sent to hr@elitegrid.co and all admins.";
+      if (onContractorNotify) onContractorNotify("Leave Filed", "Your "+lvType+(isHalf?" (Half Day)":"")+" request was submitted and is pending approval.");
       setSuccess(`Request submitted. ${isHalf?"Half day":days+" day"+(days>1?"s":"")} (${hours} hrs) is now pending.${isLWOP?" Flagged as LWOP.":""}${needsMedCert?" Medical certificate required.":""} ${notifMsg}`);
       setStart(""); setEnd(""); setReason(""); setLoading(false);
     },700);
@@ -943,7 +959,7 @@ function CAnnouncements({ announcements }) {
 // ADMIN PAGES
 // ══════════════════════════════════════════════════════════
 
-function AOverview({ user, contractors, leaves, perms, setPage }) {
+function AOverview({ user, contractors, leaves, perms, setPage, announcements }) {
   const visible  = getVisible(user,contractors,perms);
   const active   = visible.filter(c=>c.status==="Active").length;
   const noPhoto  = visible.filter(c=>c.status==="Active"&&!c.photoUrl).length;
@@ -1003,6 +1019,26 @@ function AOverview({ user, contractors, leaves, perms, setPage }) {
             </div>
           ))
         }
+      </Card>
+
+      {/* Announcements on Overview */}
+      <Card style={{ marginTop:14 }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+          <div style={{ fontSize:15, fontWeight:700 }}>Latest Announcements</div>
+          <button onClick={()=>setPage("a-announce")} style={{ background:"none", border:"none", color:C.blue, fontSize:13, fontWeight:600, cursor:"pointer" }}>View all</button>
+        </div>
+        {(announcements||INIT_ANNOUNCEMENTS).slice(0,3).map((a,i) => (
+          <div key={i} onClick={()=>setPage("a-announce")}
+            style={{ padding:"12px 0", borderBottom:i<2?`1px solid ${C.border}`:"none", cursor:"pointer" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:5 }}>
+              <span style={{ background:a.tagColor, color:"#fff", fontSize:10, fontWeight:700, padding:"2px 9px", borderRadius:20 }}>{a.tag}</span>
+              <span style={{ fontSize:12, color:C.muted }}>{a.date}</span>
+              <span style={{ fontSize:12, color:C.muted }}>— {a.postedBy}</span>
+            </div>
+            <div style={{ fontWeight:600, fontSize:14, color:C.navy, marginBottom:3 }}>{a.title}</div>
+            <div style={{ fontSize:13, color:C.muted, lineHeight:1.5 }}>{a.body&&a.body.length>100?a.body.substring(0,100)+"...":a.body}</div>
+          </div>
+        ))}
       </Card>
     </div>
   );
@@ -1073,9 +1109,9 @@ function ATeam({ user, contractors, setContractors, perms }) {
                             style={{ padding:"4px 8px", borderRadius:7, border:`1px solid ${C.border}`, fontSize:11, fontFamily:"inherit", outline:"none", background:"#fff", cursor:"pointer",
                               color: c.role==="superadmin"?C.gold : c.role==="admin"?"#1D4ED8" : C.muted,
                               fontWeight:700 }}>
-                            <option value="Contractor">Contractor</option>
-                            <option value="Admin">Admin</option>
-                            <option value="Super Admin">Super Admin</option>
+                            <option value="contractor">Contractor</option>
+                            <option value="admin">Admin</option>
+                            <option value="superadmin">Super Admin</option>
                           </select>
                         : <SBadge s={c.role}/>
                       }
@@ -1147,7 +1183,7 @@ function ContractorModal({ user, onClose, onSave, mode, existing }) {
               <FieldLabel>{label}</FieldLabel>
               <select value={form[key]||""} onChange={e=>set(key,e.target.value)} disabled={!isSA&&key==="role"}
                 style={{ width:"100%", padding:"10px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", background:"#fff", opacity:(!isSA&&key==="role")?0.5:1 }}>
-                {opts.map(o=>{ const label=o==="superadmin"?"Super Admin":o==="admin"?"Admin":"Contractor"; const val=o==="superadmin"?"Super Admin":o==="admin"?"Admin":"Contractor"; return <option key={o} value={val}>{label}</option>; })}
+                {opts.map(o=><option key={o} value={o}>{o==="superadmin"?"Super Admin":o==="admin"?"Admin":"Contractor"}</option>)}
               </select>
             </div>
           ))}
@@ -1179,7 +1215,266 @@ function ContractorModal({ user, onClose, onSave, mode, existing }) {
   );
 }
 
-function ALeaveApprovals({ user, leaves, setLeaves, setContractors, contractors, perms }) {
+
+// ── ADMIN PAYSLIPS PAGE ──────────────────────────────────────────────
+function APayslips({ user, contractors, payslips, setPayslips, perms }) {
+  const [showForm, setShowForm] = useState(false);
+  const [search,   setSearch]   = useState("");
+  const [form,     setForm]     = useState({ username:"", period:"", gross:"", deductions:"", adjustments:"", net:"", status:"Paid", released:"" });
+  const [err,      setErr]      = useState("");
+  const [ok,       setOk]       = useState("");
+  const [loading,  setLoading]  = useState(false);
+
+  const visible = getVisible(user, contractors, perms).filter(c=>c.status==="Active");
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  // Auto-calc net pay
+  const calcNet = (f) => {
+    const g  = parseFloat(String(f.gross||"").replace(/[^0-9.]/g,""))||0;
+    const al = parseFloat(String(f.allowance||"").replace(/[^0-9.]/g,""))||0;
+    const d  = parseFloat(String(f.deductions||"").replace(/[^0-9.]/g,""))||0;
+    const aj = parseFloat(String(f.adjustments||"").replace(/[^0-9.-]/g,""))||0;
+    return g + al - d + aj;
+  };
+
+  const filtered = payslips.filter(p=>
+    p.username.toLowerCase().includes(search.toLowerCase()) ||
+    (p.name||"").toLowerCase().includes(search.toLowerCase())
+  );
+
+  const save = () => {
+    setErr("");
+    if (!form.username||!form.period||!form.gross) { setErr("Contractor, period, and gross pay are required."); return; }
+    setLoading(true);
+    const net = "$"+calcNet(form).toFixed(2);
+    const entry = { ...form, net, name: (contractors.find(c=>c.username===form.username)||{}).name||form.username };
+    if (!DEMO_MODE) {
+      callScript("addPayslip", {...form, net}, ()=>{
+        setPayslips(p=>[entry,...p]);
+        setForm({ username:"", period:"", gross:"", deductions:"", adjustments:"", net:"", status:"Paid", released:"" });
+        setOk("Payslip saved successfully."); setLoading(false);
+        setTimeout(()=>setOk(""),3000);
+      }, ()=>{ setErr("Failed to save. Try again."); setLoading(false); });
+    } else {
+      setPayslips(p=>[entry,...p]);
+      setForm({ username:"", period:"", gross:"", deductions:"", adjustments:"", net:"", status:"Paid", released:"" });
+      setOk("Payslip saved. (Demo)"); setLoading(false);
+      setTimeout(()=>setOk(""),3000);
+    }
+  };
+
+  const netPreview = form.gross ? calcNet(form) : null;
+
+  return (
+    <div style={{ padding:"28px 20px", maxWidth:960, margin:"0 auto" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20, flexWrap:"wrap", gap:10 }}>
+        <div style={{ fontSize:20, fontWeight:800 }}>Payslips</div>
+        <Btn onClick={()=>setShowForm(!showForm)}>+ Add Payslip</Btn>
+      </div>
+
+      {showForm && (
+        <Card style={{ marginBottom:20 }}>
+          <div style={{ fontSize:15, fontWeight:700, marginBottom:16 }}>New Payslip</div>
+          {err && <Alert type="error">{err}</Alert>}
+          {ok  && <Alert type="success">{ok}</Alert>}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:14, marginBottom:14 }}>
+            <div>
+              <FieldLabel required>Contractor</FieldLabel>
+              <select value={form.username} onChange={e=>set("username",e.target.value)}
+                style={{ width:"100%", padding:"10px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", background:"#fff" }}>
+                <option value="">Select contractor...</option>
+                {visible.map(c=><option key={c.username} value={c.username}>{c.name} (@{c.username})</option>)}
+              </select>
+            </div>
+            <div>
+              <FieldLabel required>Pay Period</FieldLabel>
+              <FieldInput value={form.period} onChange={e=>set("period",e.target.value)} placeholder="e.g. May 16-31, 2025"/>
+            </div>
+            <div>
+              <FieldLabel required>Gross Pay</FieldLabel>
+              <FieldInput value={form.gross} onChange={e=>set("gross",e.target.value)} placeholder="e.g. $560.00"/>
+            </div>
+            <div>
+              <FieldLabel>Allowance</FieldLabel>
+              <FieldInput value={form.allowance||""} onChange={e=>set("allowance",e.target.value)} placeholder="e.g. $10.00"/>
+            </div>
+            <div>
+              <FieldLabel>Deductions</FieldLabel>
+              <FieldInput value={form.deductions} onChange={e=>set("deductions",e.target.value)} placeholder="e.g. $28.00"/>
+            </div>
+            <div>
+              <FieldLabel>Adjustments</FieldLabel>
+              <FieldInput value={form.adjustments} onChange={e=>set("adjustments",e.target.value)} placeholder="e.g. $50.00 or -$20.00"/>
+            </div>
+            <div>
+              <FieldLabel>Status</FieldLabel>
+              <select value={form.status} onChange={e=>set("status",e.target.value)}
+                style={{ width:"100%", padding:"10px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", background:"#fff" }}>
+                <option value="Paid">Paid</option>
+                <option value="Pending">Pending</option>
+              </select>
+            </div>
+            <div>
+              <FieldLabel>Date Released</FieldLabel>
+              <FieldInput type="date" value={form.released} onChange={e=>set("released",e.target.value)}/>
+            </div>
+          </div>
+          {netPreview!==null && (
+            <div style={{ padding:"10px 14px", background:C.off, borderRadius:8, fontSize:13, marginBottom:14 }}>
+              Net Pay Preview: <b style={{ color:C.blue, fontSize:15 }}>${netPreview.toFixed(2)}</b>
+            </div>
+          )}
+          <div style={{ display:"flex", gap:10 }}>
+            <Btn onClick={save} disabled={loading} style={{ padding:"10px 24px" }}>{loading?"Saving...":"Save Payslip"}</Btn>
+            <Btn variant="secondary" onClick={()=>{ setShowForm(false); setErr(""); }} style={{ padding:"10px 24px" }}>Cancel</Btn>
+          </div>
+        </Card>
+      )}
+
+      <div style={{ marginBottom:14 }}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or username..."
+          style={{ padding:"8px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", width:260 }}/>
+      </div>
+
+      <Card style={{ padding:0, overflow:"hidden" }}>
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
+            <thead><tr style={{ background:C.off }}>
+              {["Contractor","Period","Gross Pay","Allowance","Deductions","Adjustments","Net Pay","Status","Released"].map(h=>(
+                <th key={h} style={{ padding:"10px 14px", textAlign:"left", fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.5px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {filtered.length===0
+                ? <tr><td colSpan={8} style={{ padding:32, textAlign:"center", color:C.muted, fontSize:14 }}>No payslips found.</td></tr>
+                : filtered.map((p,i)=>(
+                  <tr key={i} style={{ borderBottom:`1px solid ${C.border}` }}>
+                    <td style={{ padding:"11px 14px" }}>
+                      <div style={{ fontWeight:600, fontSize:13 }}>{p.name||p.username}</div>
+                      <div style={{ fontSize:11, color:C.muted }}>@{p.username}</div>
+                    </td>
+                    <td style={{ padding:"11px 14px", fontSize:13 }}>{p.period}</td>
+                    <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.gross)}</td>
+                    <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.allowance)}</td>
+                    <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.deductions)}</td>
+                    <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.adjustments)}</td>
+                    <td style={{ padding:"11px 14px", fontSize:13, fontWeight:700 }}>{fmtCur(p.net)}</td>
+                    <td style={{ padding:"11px 14px" }}><SBadge s={p.status}/></td>
+                    <td style={{ padding:"11px 14px", fontSize:12, color:C.muted }}>{p.released}</td>
+                  </tr>
+                ))
+              }
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+
+// ── LEAVE CALENDAR ───────────────────────────────────────────────────
+function ALeaveCalendar({ leaves, contractors, perms, user }) {
+  const today = new Date();
+  const [year,  setYear]  = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth());
+
+  const visible = getVisible(user, contractors, perms);
+  const CLIENT_COLORS = ["#2E86C1","#5BC8E8","#16A34A","#D97706","#7C3AED","#DC2626","#0E7490"];
+  const clients = [...new Set(visible.map(c=>c.client))];
+  const colorMap = {};
+  clients.forEach((cl,i) => colorMap[cl] = CLIENT_COLORS[i % CLIENT_COLORS.length]);
+
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const firstDay    = new Date(year, month, 1).getDay();
+  const monthName   = new Date(year, month, 1).toLocaleString("en-US",{month:"long",year:"numeric"});
+
+  const approvedLeaves = leaves.filter(l=>l.status==="Approved"||l.status==="Pending");
+
+  const getLeavesForDay = (day) => {
+    const d = new Date(year, month, day);
+    return approvedLeaves.filter(l => {
+      const start = new Date(l.start);
+      const end   = new Date(l.end||l.start);
+      return d >= start && d <= end && visible.find(c=>c.username===l.username);
+    });
+  };
+
+  const prevMonth = () => { if(month===0){setMonth(11);setYear(y=>y-1);}else setMonth(m=>m-1); };
+  const nextMonth = () => { if(month===11){setMonth(0);setYear(y=>y+1);}else setMonth(m=>m+1); };
+
+  const cells = [];
+  for(let i=0;i<firstDay;i++) cells.push(null);
+  for(let d=1;d<=daysInMonth;d++) cells.push(d);
+  while(cells.length%7!==0) cells.push(null);
+
+  const isToday = (d) => d && year===today.getFullYear() && month===today.getMonth() && d===today.getDate();
+
+  return (
+    <div style={{ padding:"28px 20px", maxWidth:1000, margin:"0 auto" }}>
+      <div style={{ fontSize:20, fontWeight:800, marginBottom:20 }}>Leave Calendar</div>
+
+      {/* Legend */}
+      <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:16 }}>
+        {clients.map(cl=>(
+          <div key={cl} style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <div style={{ width:12, height:12, borderRadius:3, background:colorMap[cl] }}/>
+            <span style={{ fontSize:12, color:C.muted, fontWeight:600 }}>{cl}</span>
+          </div>
+        ))}
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <div style={{ width:12, height:12, borderRadius:3, background:C.amberBg, border:`1px solid ${C.amber}` }}/>
+          <span style={{ fontSize:12, color:C.muted, fontWeight:600 }}>Pending</span>
+        </div>
+      </div>
+
+      <Card>
+        {/* Month nav */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+          <button onClick={prevMonth} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", fontSize:16, fontFamily:"inherit" }}>‹</button>
+          <div style={{ fontSize:16, fontWeight:800, color:C.navy }}>{monthName}</div>
+          <button onClick={nextMonth} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", fontSize:16, fontFamily:"inherit" }}>›</button>
+        </div>
+
+        {/* Day headers */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:4 }}>
+          {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>(
+            <div key={d} style={{ textAlign:"center", fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", padding:"4px 0" }}>{d}</div>
+          ))}
+        </div>
+
+        {/* Calendar grid */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
+          {cells.map((d,i)=>{
+            const dayLeaves = d ? getLeavesForDay(d) : [];
+            return (
+              <div key={i} style={{ minHeight:72, borderRadius:8, padding:"4px 6px", background:isToday(d)?"#EFF6FF":d?"#fff":"transparent", border:isToday(d)?`2px solid ${C.blue}`:`1px solid ${C.border}` }}>
+                {d && (
+                  <>
+                    <div style={{ fontSize:12, fontWeight:isToday(d)?800:500, color:isToday(d)?C.blue:C.navy, marginBottom:3 }}>{d}</div>
+                    {dayLeaves.slice(0,3).map((l,j)=>{
+                      const c = visible.find(ct=>ct.username===l.username);
+                      const bg = l.status==="Pending" ? C.amberBg : (colorMap[c&&c.client]||C.blue);
+                      const col = l.status==="Pending" ? C.amber : "#fff";
+                      return (
+                        <div key={j} style={{ background:bg, color:col, fontSize:9, fontWeight:700, padding:"2px 5px", borderRadius:4, marginBottom:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                          {c?c.name.split(" ")[0]:l.username} {l.isHalfDay?"½":""}
+                        </div>
+                      );
+                    })}
+                    {dayLeaves.length>3 && <div style={{ fontSize:9, color:C.muted, fontWeight:600 }}>+{dayLeaves.length-3} more</div>}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function ALeaveApprovals({ user, leaves, setLeaves, setContractors, contractors, perms, onNotify }) {
   const [filter, setFilter] = useState("Pending");
   const visible   = getVisible(user,contractors,perms);
   const myLeaves  = leaves.filter(l=>visible.find(c=>c.username===l.username));
@@ -1191,6 +1486,7 @@ function ALeaveApprovals({ user, leaves, setLeaves, setContractors, contractors,
     const dated = user.name+" - "+new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
     if (!DEMO_MODE) callScript(act==="approve"?"approveLeave":"rejectLeave", {leaveId, adminName:user.name}, ()=>{}, ()=>{});
     setLeaves(prev=>prev.map(l=>l.leaveId===leaveId?{...l,status:act==="approve"?"Approved":"Rejected",actionedBy:dated}:l));
+    if (onNotify) onNotify("Leave "+(act==="approve"?"Approved":"Rejected"), leave.name+"'s "+leave.leaveType+" request was "+(act==="approve"?"approved":"rejected")+".");
     if (act==="approve") {
       setContractors(prev=>prev.map(c=>{
         if (c.username!==leave.username)return c;
@@ -1902,9 +2198,9 @@ function ARolesAccess({ user, contractors, setContractors, perms, setPerms }) {
               {a.username!==user.username&&(
                 <select value={a.role} onChange={e=>{ changeRole(a.username,e.target.value); if(!DEMO_MODE) callScript('updateContractor',{username:a.username,role:e.target.value},()=>{},()=>{}); }}
                   style={{ padding:"6px 10px", borderRadius:7, border:`1px solid ${C.border}`, fontSize:12, fontFamily:"inherit", outline:"none", background:"#fff" }}>
-                  <option value="Contractor">Contractor</option>
-                  <option value="Admin">Admin</option>
-                  <option value="Super Admin">Super Admin</option>
+                  <option value="contractor">Contractor</option>
+                  <option value="admin">Admin</option>
+                  <option value="superadmin">Super Admin</option>
                 </select>
               )}
               {a.role==="admin"&&<button onClick={()=>openPerm(a)} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:7, padding:"6px 12px", fontSize:12, color:C.blue, fontWeight:600, cursor:"pointer" }}>Set Access</button>}
@@ -1940,16 +2236,40 @@ function ARolesAccess({ user, contractors, setContractors, perms, setPerms }) {
 // ROOT APP
 // ══════════════════════════════════════════════════════════
 function App() {
-  const [currentUser,   setCurrentUser]   = useState(null);
-  const [page,          setPage]          = useState("c-dashboard");
+  const [currentUser,   setCurrentUser]   = useState(() => {
+    try {
+      const saved = localStorage.getItem("eg_session");
+      return saved ? JSON.parse(saved) : null;
+    } catch(e) { return null; }
+  });
+  const [page,          setPage]          = useState(() => {
+    try {
+      const saved = localStorage.getItem("eg_session");
+      if (!saved) return "c-dashboard";
+      const u = JSON.parse(saved);
+      return (u.role==="contractor")?"c-dashboard":"a-overview";
+    } catch(e) { return "c-dashboard"; }
+  });
   const [chPwOpen,      setChPwOpen]      = useState(false);
   const inactivityTimer = React.useRef(null);
 
+  const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
+  const warningTimer = React.useRef(null);
+
   const resetTimer = React.useCallback(() => {
     if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+    if (warningTimer.current)    clearTimeout(warningTimer.current);
+    setShowTimeoutWarning(false);
+    // Show warning at 2 minutes
+    warningTimer.current = setTimeout(() => {
+      setShowTimeoutWarning(true);
+    }, 2 * 60 * 1000);
+    // Log out at 3 minutes
     inactivityTimer.current = setTimeout(() => {
+      try { localStorage.removeItem("eg_session"); } catch(e) {}
+      setShowTimeoutWarning(false);
       setCurrentUser(null); setPage("c-dashboard"); setChPwOpen(false);
-    }, 3 * 60 * 1000); // 3 minutes
+    }, 3 * 60 * 1000);
   }, []);
 
   React.useEffect(() => {
@@ -1963,12 +2283,21 @@ function App() {
     };
   }, [currentUser, resetTimer]);
   const [contractors,   setContractors]   = useState([...INIT_CONTRACTORS]);
-  const [payslips]                        = useState([...INIT_PAYSLIPS]);
+  const [payslips,      setPayslips]      = useState([...INIT_PAYSLIPS]);
   const [leaves,        setLeaves]        = useState([...INIT_LEAVES]);
   const [announcements, setAnnouncements] = useState([...INIT_ANNOUNCEMENTS]);
   const [auditLog,      setAuditLog]      = useState([...INIT_AUDIT]);
   const [clients,       setClients]       = useState([...INIT_CLIENTS]);
   const [perms,         setPerms]         = useState({...INIT_PERMS});
+  const [notifications, setNotifications] = useState([]);
+
+  const addNotification = React.useCallback((title, body) => {
+    const time = new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
+    setNotifications(prev=>[{title,body,time,read:false},...prev].slice(0,20));
+  }, []);
+
+  const clearNotifs  = () => setNotifications([]);
+  const markRead     = (i) => setNotifications(prev=>prev.map((n,idx)=>idx===i?{...n,read:true}:n));
 
   const login = (u) => {
     // If live data from Sheet, payslips/announcements come inside u directly
@@ -1983,8 +2312,14 @@ function App() {
     // Flatten profile fields onto u for compatibility
     if (u.profile) {
       u.name     = u.profile.name;
-      u.role     = u.profile.role || "contractor";
+      // Normalize role to lowercase internal values
+      const rawRole = u.profile.role || "contractor";
+      u.role     = rawRole==="Super Admin"?"superadmin":rawRole==="Admin"?"admin":rawRole==="Contractor"?"contractor":rawRole.toLowerCase().replace(/\s+/g,"") || "contractor";
       u.photoUrl = u.profile.photoUrl || "";
+    }
+    // Also normalize if role is directly on u (demo mode)
+    if (u.role) {
+      u.role = u.role==="Super Admin"?"superadmin":u.role==="Admin"?"admin":u.role==="Contractor"?"contractor":u.role;
     }
     // Initialize live data from Sheet response
     if (!DEMO_MODE) {
@@ -1997,15 +2332,16 @@ function App() {
         setContractors(u.allContractors);
       }
     }
+    try { localStorage.setItem("eg_session", JSON.stringify(u)); } catch(e) {}
     setCurrentUser(u);
     setPage((u.role||u.profile&&u.profile.role)==="contractor"?"c-dashboard":"a-overview");
   };
 
-  const logout = () => { setCurrentUser(null); setPage("c-dashboard"); setChPwOpen(false); };
+  const logout = () => { try { localStorage.removeItem("eg_session"); } catch(e) {} setCurrentUser(null); setPage("c-dashboard"); setChPwOpen(false); };
 
   if (!currentUser) return <LoginScreen onLogin={login}/>;
 
-  const isContractor = (currentUser.role||"contractor")==="contractor";
+  const isContractor = currentUser.role!=="superadmin" && currentUser.role!=="admin";
   // For live data, build contractor object from profile
   const liveContractor = currentUser.profile ? {
     username:       currentUser._username,
@@ -2035,30 +2371,43 @@ function App() {
     "c-profile":       <CProfile      contractor={contractor} setContractors={setContractors}/>,
     "c-payslips":      <CPayslips     user={currentUser}/>,
     "c-pto":           <CPTOPage      contractor={contractor} setPage={setPage}/>,
-    "c-leave":         <CLeave        user={currentUser} contractor={contractor} leaves={leaves} setLeaves={setLeaves} setContractors={setContractors}/>,
+    "c-leave":         <CLeave        user={currentUser} contractor={contractor} leaves={leaves} setLeaves={setLeaves} setContractors={setContractors} onContractorNotify={addNotification}/>,
     "c-announcements": <CAnnouncements announcements={announcements}/>,
   };
 
   const adminPages = {
-    "a-overview":  <AOverview       user={currentUser} contractors={contractors} leaves={leaves} perms={perms} setPage={setPage}/>,
+    "a-overview":  <AOverview       user={currentUser} contractors={contractors} leaves={leaves} perms={perms} setPage={setPage} announcements={announcements}/>,
     "a-team":      <ATeam           user={currentUser} contractors={contractors} setContractors={setContractors} perms={perms}/>,
-    "a-leave":     <ALeaveApprovals user={currentUser} leaves={leaves} setLeaves={setLeaves} setContractors={setContractors} contractors={contractors} perms={perms}/>,
+    "a-leave":     <ALeaveApprovals user={currentUser} leaves={leaves} setLeaves={setLeaves} setContractors={setContractors} contractors={contractors} perms={perms} onNotify={addNotification}/>,
     "a-pto":       <APTOManagement  user={currentUser} contractors={contractors} setContractors={setContractors} auditLog={auditLog} setAuditLog={setAuditLog} perms={perms}/>,
     "a-announce":  <AAnnouncements  user={currentUser} announcements={announcements} setAnnouncements={setAnnouncements}/>,
-    "a-clients":   <AClients       user={currentUser} contractors={contractors} clients={clients} setClients={setClients}/>,
+    "a-clients":   <AClients        user={currentUser} contractors={contractors} clients={clients} setClients={setClients}/>,
     "a-email":     <AEmailBlast     user={currentUser} contractors={contractors} perms={perms}/>,
     "a-audit":     <AAuditLog       auditLog={auditLog}/>,
     "a-roles":     <ARolesAccess    user={currentUser} contractors={contractors} setContractors={setContractors} perms={perms} setPerms={setPerms}/>,
+    "a-payslips":  <APayslips       user={currentUser} contractors={contractors} payslips={payslips} setPayslips={setPayslips} perms={perms}/>,
+    "a-calendar":  <ALeaveCalendar  user={currentUser} contractors={contractors} leaves={leaves} perms={perms}/>,
   };
 
   return (
     <div style={{ minHeight:"100vh", background:C.off, fontFamily:"'Inter',sans-serif", color:C.navy }}>
       {isContractor
-        ? <ContractorNav page={page} setPage={setPage} user={currentUser} onLogout={logout} onChPw={()=>setChPwOpen(true)}/>
-        : <AdminNav      page={page} setPage={setPage} user={currentUser} onLogout={logout}/>
+        ? <ContractorNav page={page} setPage={setPage} user={currentUser} onLogout={logout} onChPw={()=>setChPwOpen(true)} notifications={notifications} onClearNotifs={clearNotifs} onMarkRead={markRead}/>
+        : <AdminNav      page={page} setPage={setPage} user={currentUser} onLogout={logout} notifications={notifications} onClearNotifs={clearNotifs} onMarkRead={markRead}/>
       }
       {isContractor?(contractorPages[page]||contractorPages["c-dashboard"]):(adminPages[page]||adminPages["a-overview"])}
       {chPwOpen&&<ChangePwModal user={currentUser} onClose={()=>setChPwOpen(false)}/>}
+      {showTimeoutWarning && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(27,42,74,0.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:500, padding:16 }}>
+          <div style={{ background:"#fff", borderRadius:16, padding:36, maxWidth:380, width:"100%", textAlign:"center", boxShadow:"0 24px 80px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize:36, marginBottom:12 }}>⏱</div>
+            <div style={{ fontSize:18, fontWeight:800, color:C.navy, marginBottom:8 }}>Still there?</div>
+            <div style={{ fontSize:14, color:C.muted, marginBottom:24, lineHeight:1.6 }}>You will be logged out in <b style={{ color:C.red }}>1 minute</b> due to inactivity.</div>
+            <Btn onClick={()=>{ setShowTimeoutWarning(false); resetTimer(); }} style={{ width:"100%", padding:13, fontSize:15, marginBottom:10 }}>Stay Logged In</Btn>
+            <Btn variant="secondary" onClick={logout} style={{ width:"100%", padding:12 }}>Log Out Now</Btn>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
