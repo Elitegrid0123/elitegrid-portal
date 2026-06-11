@@ -152,6 +152,9 @@ const canDo = (role, action) => {
   return (rules[action]||[]).includes(role);
 };
 
+
+const roleLabel = (r) => r==="superadmin"?"Super Admin":r==="admin"?"Admin":r==="contractor"?"Contractor":r||"Contractor";
+
 const getVisible = (user, contractors, perms) => {
   if (user.role === "superadmin") return contractors;
   const p = perms[user.username];
@@ -175,6 +178,7 @@ const Card = ({ children, style }) => (
 );
 
 const SBadge = ({ s }) => {
+  const roleMap = { superadmin:"Super Admin", admin:"Admin", contractor:"Contractor" };
   const map = {
     Active:[C.greenBg,C.green], Inactive:[C.off,C.muted], Archived:["#F3F4F6","#6B7280"],
     Paid:[C.greenBg,C.green], Pending:[C.amberBg,C.amber],
@@ -183,7 +187,8 @@ const SBadge = ({ s }) => {
     LWOP:[C.amberBg,"#92400E"],
   };
   const [bg,col] = map[s] || [C.off,C.muted];
-  return <span style={{ background:bg, color:col, fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:20, display:"inline-block", whiteSpace:"nowrap" }}>{s}</span>;
+  const label = roleMap[s] || s;
+  return <span style={{ background:bg, color:col, fontSize:10, fontWeight:700, padding:"3px 10px", borderRadius:20, display:"inline-block", whiteSpace:"nowrap" }}>{label}</span>;
 };
 
 const Avatar = ({ name, photoUrl, size=48 }) => {
@@ -606,12 +611,13 @@ function CDashboard({ user, contractor, leaves, setPage }) {
           <button onClick={()=>setPage("c-announcements")} style={{ background:"none", border:"none", color:C.blue, fontSize:13, fontWeight:600, cursor:"pointer" }}>View all</button>
         </div>
         {(user._announcements||INIT_ANNOUNCEMENTS).slice(0,2).map((a,i) => (
-          <div key={i} style={{ padding:"12px 0", borderBottom:i===0?`1px solid ${C.border}`:"none" }}>
+          <div key={i} onClick={()=>setPage("c-announcements")} style={{ padding:"12px 0", borderBottom:i===0?`1px solid ${C.border}`:"none", cursor:"pointer" }}>
             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:5 }}>
               <span style={{ background:a.tagColor, color:"#fff", fontSize:10, fontWeight:700, padding:"2px 9px", borderRadius:20 }}>{a.tag}</span>
               <span style={{ fontSize:12, color:C.muted }}>{a.date}</span>
             </div>
             <div style={{ fontWeight:600, fontSize:14, color:C.navy }}>{a.title}</div>
+            <div style={{ fontSize:11, color:C.blue, marginTop:3, fontWeight:600 }}>Read more</div>
           </div>
         ))}
       </Card>
@@ -673,7 +679,7 @@ function CPayslips({ user }) {
         <div style={{ overflowX:"auto" }}>
           <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead><tr style={{ background:C.off }}>
-              {["Pay Period","Gross","Deductions","Net Pay","Status","Released",""].map(h => (
+              {["Pay Period","Gross","Deductions","Adjustments","Net Pay","Status","Released",""].map(h => (
                 <th key={h} style={{ padding:"10px 14px", textAlign:"left", fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.5px", borderBottom:`1px solid ${C.border}` }}>{h}</th>
               ))}
             </tr></thead>
@@ -709,7 +715,7 @@ function CPayslips({ user }) {
               <div style={{ background:C.navy, padding:"6px 14px", borderRadius:8, fontSize:10, color:C.cyan, fontWeight:700, letterSpacing:1 }}>ELITE GRID</div>
             </div>
             <div style={{ background:C.off, borderRadius:10, padding:16, marginBottom:18 }}>
-              {[["Gross Pay",sel.gross,C.navy],["Deductions",sel.deductions,C.red],["Net Pay",sel.net,C.blue]].map(([l,v,col]) => (
+              {[["Gross Pay",sel.gross,C.navy],["Deductions",sel.deductions,C.red],["Adjustments",sel.adjustments||"$0.00",sel.adjustments&&sel.adjustments.toString().includes("-")?C.red:C.green],["Net Pay",sel.net,C.blue]].map(([l,v,col]) => (
                 <div key={l} style={{ display:"flex", justifyContent:"space-between", padding:"9px 0", borderBottom:l!=="Net Pay"?`1px solid ${C.border}`:"none" }}>
                   <span style={{ fontSize:14, color:l==="Net Pay"?C.navy:C.muted, fontWeight:l==="Net Pay"?700:400 }}>{l}</span>
                   <span style={{ fontSize:l==="Net Pay"?18:15, fontWeight:700, color:col }}>{v}</span>
@@ -1008,9 +1014,9 @@ function ATeam({ user, contractors, setContractors, perms }) {
     .filter(c=>filterSt==="All"||c.status===filterSt)
     .filter(c=>c.name.toLowerCase().includes(search.toLowerCase())||c.client.toLowerCase().includes(search.toLowerCase()));
 
-  const softDelete   = (un) => { if(!canDo(user.role,"delete"))return; setContractors(p=>p.map(c=>c.username===un?{...c,status:"Inactive"}:c)); };
+  const softDelete   = (un) => { if(!canDo(user.role,"delete"))return; setContractors(p=>p.map(c=>c.username===un?{...c,status:"Inactive"}:c)); if(!DEMO_MODE) callScript("updateContractor",{username:un,status:"Inactive"},()=>{},()=>{}); };
   const archive      = (un) => { if(!canDo(user.role,"delete"))return; setContractors(p=>p.map(c=>c.username===un?{...c,status:"Archived"}:c)); };
-  const reactivate   = (un) => { if(!canDo(user.role,"delete"))return; setContractors(p=>p.map(c=>c.username===un?{...c,status:"Active"}:c)); };
+  const reactivate   = (un) => { if(!canDo(user.role,"delete"))return; setContractors(p=>p.map(c=>c.username===un?{...c,status:"Active"}:c)); if(!DEMO_MODE) callScript("updateContractor",{username:un,status:"Active"},()=>{},()=>{}); };
 
   return (
     <div style={{ padding:"28px 20px", maxWidth:960, margin:"0 auto" }}>
@@ -1051,7 +1057,25 @@ function ATeam({ user, contractors, setContractors, perms }) {
                     <td style={{ padding:"12px 14px", fontSize:13 }}>{c.tier}</td>
                     <td style={{ padding:"12px 14px", fontSize:13, fontWeight:600, color:C.blue }}>{c.rate}</td>
                     <td style={{ padding:"12px 14px" }}><SBadge s={c.status}/></td>
-                    <td style={{ padding:"12px 14px" }}><SBadge s={c.role}/></td>
+                    <td style={{ padding:"12px 14px" }}>
+                      {user.role==="superadmin"
+                        ? <select
+                            value={c.role}
+                            onChange={e=>{
+                              const newRole = e.target.value;
+                              setContractors(p=>p.map(x=>x.username===c.username?{...x,role:newRole}:x));
+                              if (!DEMO_MODE) callScript("updateContractor",{username:c.username,role:newRole},()=>{},()=>{});
+                            }}
+                            style={{ padding:"4px 8px", borderRadius:7, border:`1px solid ${C.border}`, fontSize:11, fontFamily:"inherit", outline:"none", background:"#fff", cursor:"pointer",
+                              color: c.role==="superadmin"?C.gold : c.role==="admin"?"#1D4ED8" : C.muted,
+                              fontWeight:700 }}>
+                            <option value="contractor">Contractor</option>
+                            <option value="admin">Admin</option>
+                            <option value="superadmin">Super Admin</option>
+                          </select>
+                        : <SBadge s={c.role}/>
+                      }
+                    </td>
                     <td style={{ padding:"12px 14px" }}>
                       <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                         <button onClick={()=>setEditTarget(c)} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 10px", fontSize:11, color:C.blue, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}>Edit</button>
@@ -1119,7 +1143,7 @@ function ContractorModal({ user, onClose, onSave, mode, existing }) {
               <FieldLabel>{label}</FieldLabel>
               <select value={form[key]||""} onChange={e=>set(key,e.target.value)} disabled={!isSA&&key==="role"}
                 style={{ width:"100%", padding:"10px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", background:"#fff", opacity:(!isSA&&key==="role")?0.5:1 }}>
-                {opts.map(o=><option key={o} value={o}>{o}</option>)}
+                {opts.map(o=><option key={o} value={o}>{o==="superadmin"?"Super Admin":o==="admin"?"Admin":"Contractor"}</option>)}
               </select>
             </div>
           ))}
@@ -1127,7 +1151,7 @@ function ContractorModal({ user, onClose, onSave, mode, existing }) {
         {(mode==="add"||isSA)&&(
           <div style={{ marginBottom:14 }}>
             <FieldLabel required>Rate</FieldLabel>
-            <FieldInput value={form.rate||""} onChange={e=>set("rate",e.target.value)} placeholder="e.g. $7.00/hr"/>
+            <FieldInput value={form.rate||""} onChange={e=>{ let v=e.target.value.replace(/[^0-9.]/g,""); if(v) v="$"+parseFloat(v).toFixed(2)+"/hr"; set("rate",v||e.target.value); }} placeholder="e.g. 7 → $7.00/hr"/>
           </div>
         )}
         <div style={{ background:C.off, borderRadius:10, padding:16, marginBottom:20 }}>
@@ -1846,7 +1870,7 @@ function AAuditLog({ auditLog }) {
 function ARolesAccess({ user, contractors, setContractors, perms, setPerms }) {
   const [editPerm,setEditPerm]       = useState(null);
   const [tempClients,setTempClients] = useState([]);
-  const admins = contractors.filter(c=>["admin","superadmin"].includes(c.role)&&c.status==="Active");
+  const admins = contractors.filter(c=>c.status==="Active"); // Super Admin sees all
   const openPerm = (admin) => { setEditPerm(admin); setTempClients((perms[admin.username] && perms[admin.username].assignedClients)||[]); };
   const savePerm = () => { setPerms(prev=>({...prev,[editPerm.username]:{assignedClients:tempClients}})); setEditPerm(null); };
   const toggleCl = (cl) => setTempClients(prev=>prev.includes(cl)?prev.filter(c=>c!==cl):[...prev,cl]);
@@ -1872,11 +1896,11 @@ function ARolesAccess({ user, contractors, setContractors, perms, setPerms }) {
             </div>
             <div style={{ display:"flex", gap:8 }}>
               {a.username!==user.username&&(
-                <select value={a.role} onChange={e=>changeRole(a.username,e.target.value)}
+                <select value={a.role} onChange={e=>{ changeRole(a.username,e.target.value); if(!DEMO_MODE) callScript('updateContractor',{username:a.username,role:e.target.value},()=>{},()=>{}); }}
                   style={{ padding:"6px 10px", borderRadius:7, border:`1px solid ${C.border}`, fontSize:12, fontFamily:"inherit", outline:"none", background:"#fff" }}>
-                  <option value="contractor">contractor</option>
-                  <option value="admin">admin</option>
-                  <option value="superadmin">superadmin</option>
+                  <option value="contractor">Contractor</option>
+                  <option value="admin">Admin</option>
+                  <option value="superadmin">Super Admin</option>
                 </select>
               )}
               {a.role==="admin"&&<button onClick={()=>openPerm(a)} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:7, padding:"6px 12px", fontSize:12, color:C.blue, fontWeight:600, cursor:"pointer" }}>Set Access</button>}
@@ -1915,6 +1939,25 @@ function App() {
   const [currentUser,   setCurrentUser]   = useState(null);
   const [page,          setPage]          = useState("c-dashboard");
   const [chPwOpen,      setChPwOpen]      = useState(false);
+  const inactivityTimer = React.useRef(null);
+
+  const resetTimer = React.useCallback(() => {
+    if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+    inactivityTimer.current = setTimeout(() => {
+      setCurrentUser(null); setPage("c-dashboard"); setChPwOpen(false);
+    }, 3 * 60 * 1000); // 3 minutes
+  }, []);
+
+  React.useEffect(() => {
+    if (!currentUser) return;
+    const events = ["mousemove","keydown","click","scroll","touchstart"];
+    events.forEach(e => window.addEventListener(e, resetTimer));
+    resetTimer();
+    return () => {
+      events.forEach(e => window.removeEventListener(e, resetTimer));
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+    };
+  }, [currentUser, resetTimer]);
   const [contractors,   setContractors]   = useState([...INIT_CONTRACTORS]);
   const [payslips]                        = useState([...INIT_PAYSLIPS]);
   const [leaves,        setLeaves]        = useState([...INIT_LEAVES]);
