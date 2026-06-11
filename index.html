@@ -26,7 +26,7 @@ const { useState, useRef } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby2aM8FF67yeCpGP-Te-fXz3TzxseBsFWdlAGqGsfuS9PyxxfBuAVG0_zte1xxRtt2n/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz_CzX_plZRG82s3UXUx1dtNMryccRi30pZDGY2ub0xkCbc9E3LwFTGfcyXWiFYWlFe/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -812,13 +812,14 @@ function CLeave({ user, contractor, leaves, setLeaves, setContractors }) {
         filedOn:new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
         actionedBy:"", isLWOP, needsMedCert,
       };
+      if (!DEMO_MODE) callScript("submitLeave", {username:user._username, leaveType:lvType, isHalfDay:String(isHalf), startDate:start, endDate:isHalf?start:end, reason}, ()=>{}, ()=>{});
       setLeaves(prev=>[...prev,newLeave]);
       setContractors(prev=>prev.map(ct=>{
-        if (ct.username!==user.username) return ct;
+        if (ct.username!==user.username&&ct.username!==user._username) return ct;
         if (lvType==="VL") return {...ct, vlPending:parseFloat((ct.vlPending+hours).toFixed(2))};
         return {...ct, slPending:parseFloat((ct.slPending+hours).toFixed(2))};
       }));
-      const notifMsg = "(Demo) Email sent to hr@elitegrid.co and all admins.";
+      const notifMsg = !DEMO_MODE ? "Email notification sent to admin." : "(Demo) Email sent to hr@elitegrid.co and all admins.";
       setSuccess(`Request submitted. ${isHalf?"Half day":days+" day"+(days>1?"s":"")} (${hours} hrs) is now pending.${isLWOP?" Flagged as LWOP.":""}${needsMedCert?" Medical certificate required.":""} ${notifMsg}`);
       setStart(""); setEnd(""); setReason(""); setLoading(false);
     },700);
@@ -1066,8 +1067,14 @@ function ATeam({ user, contractors, setContractors, perms }) {
           </table>
         </div>
       </Card>
-      {showAdd    && <ContractorModal user={user} onClose={()=>setShowAdd(false)}    onSave={c=>{setContractors(p=>[...p,c]);setShowAdd(false);}}                                mode="add"/>}
-      {editTarget && <ContractorModal user={user} onClose={()=>setEditTarget(null)}  onSave={c=>{setContractors(p=>p.map(x=>x.username===c.username?c:x));setEditTarget(null);}} mode="edit" existing={editTarget}/>}
+      {showAdd    && <ContractorModal user={user} onClose={()=>setShowAdd(false)}    onSave={c=>{
+        if (!DEMO_MODE) callScript("addContractor", {...c, vlTotal:c.vlTotal||160, vlAccrued:c.vlAccrued||0, vlMonthlyRate:c.vlMonthlyRate||13.33, slTotal:c.slTotal||40}, ()=>{}, ()=>{});
+        setContractors(p=>[...p,c]); setShowAdd(false);
+      }} mode="add"/>}
+      {editTarget && <ContractorModal user={user} onClose={()=>setEditTarget(null)}  onSave={c=>{
+        if (!DEMO_MODE) callScript("updateContractor", c, ()=>{}, ()=>{});
+        setContractors(p=>p.map(x=>x.username===c.username?c:x)); setEditTarget(null);
+      }} mode="edit" existing={editTarget}/>}
     </div>
   );
 }
@@ -1154,6 +1161,7 @@ function ALeaveApprovals({ user, leaves, setLeaves, setContractors, contractors,
   const action = (leaveId, act) => {
     const leave = leaves.find(l=>l.leaveId===leaveId); if(!leave)return;
     const dated = user.name+" - "+new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+    if (!DEMO_MODE) callScript(act==="approve"?"approveLeave":"rejectLeave", {leaveId, adminName:user.name}, ()=>{}, ()=>{});
     setLeaves(prev=>prev.map(l=>l.leaveId===leaveId?{...l,status:act==="approve"?"Approved":"Rejected",actionedBy:dated}:l));
     if (act==="approve") {
       setContractors(prev=>prev.map(c=>{
@@ -1236,6 +1244,7 @@ function APTOManagement({ user, contractors, setContractors, auditLog, setAuditL
     if (adjField==="vlAccrued"&&newVal>200) { setAdjErr("VL cannot exceed 200 hours (25 day cap)."); return; }
     const oldVal = sel[adjField];
     const entry = { id:"AUD-"+Date.now(), admin:user.name, contractor:sel.username, field:adjField, oldVal, newVal, reason:adjReason, timestamp:new Date().toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}), notified:true };
+    if (!DEMO_MODE) callScript("adjustPTO", {adminUsername:user.username||user._username, contractorUsername:sel.username, field:adjField, newValue:newVal, reason:adjReason}, ()=>{}, ()=>{});
     setAuditLog(prev=>[entry,...prev]);
     setContractors(prev=>prev.map(c=>c.username===sel.username?{...c,[adjField]:newVal}:c));
     setSel(prev=>({...prev,[adjField]:newVal}));
@@ -1328,7 +1337,9 @@ function AAnnouncements({ user, announcements, setAnnouncements }) {
 
   const post = () => {
     if (!title.trim()||!body.trim()) { setErr("Title and body are required."); return; }
-    setAnnouncements(prev=>[{ annId:"ANN-"+Date.now(), title, body, tag, tagColor, date:new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}), postedBy:user.name },...prev]);
+    const newAnn = { annId:"ANN-"+Date.now(), title, body, tag, tagColor, date:new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}), postedBy:user.name };
+    if (!DEMO_MODE) callScript("postAnnouncement", {title, body, tag, tagColor, postedBy:user.name}, ()=>{}, ()=>{});
+    setAnnouncements(prev=>[newAnn,...prev]);
     setTitle(""); setBody(""); setShowForm(false); setErr("");
   };
 
