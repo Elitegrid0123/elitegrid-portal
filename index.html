@@ -26,7 +26,7 @@ const { useState, useRef } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby2aM8FF67yeCpGP-Te-fXz3TzxseBsFWdlAGqGsfuS9PyxxfBuAVG0_zte1xxRtt2n/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyA1FLbBaheQMYwRkpHkSr7zuq7Z0ZZApbMx2S52xV3Pwsphb4mFW1s6bad_GRV9xM6/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -141,6 +141,8 @@ const INIT_CLIENTS = [
 
 // ── HELPERS ───────────────────────────────────────────────
 const canDo = (role, action) => {
+  const norm = (r) => r==="Super Admin"?"superadmin":r==="Admin"?"admin":r==="Contractor"?"contractor":r||"contractor";
+  const nr = norm(role);
   const rules = {
     delete:["superadmin"], editSensitive:["superadmin"],
     assignRoles:["superadmin"], setPermissions:["superadmin"],
@@ -149,14 +151,16 @@ const canDo = (role, action) => {
     addContractor:["superadmin","admin"], postAnnouncement:["superadmin","admin"],
     emailBlast:["superadmin","admin"],
   };
-  return (rules[action]||[]).includes(role);
+  return (rules[action]||[]).includes(nr);
 };
 
 
-const roleLabel = (r) => r==="superadmin"?"Super Admin":r==="admin"?"Admin":r==="contractor"?"Contractor":r||"Contractor";
+const roleLabel = (r) => r==="superadmin"||r==="Super Admin"?"Super Admin":r==="admin"||r==="Admin"?"Admin":"Contractor";
+const isSuperAdmin = (r) => r==="superadmin"||r==="Super Admin";
+const isAdmin      = (r) => r==="admin"||r==="Admin"||isSuperAdmin(r);
 
 const getVisible = (user, contractors, perms) => {
-  if (user.role === "superadmin") return contractors;
+  if (user.role === "superadmin" || user.role === "Super Admin") return contractors;
   const p = perms[user.username];
   if (!p) return [];
   return contractors.filter(c => p.assignedClients.includes(c.client));
@@ -178,12 +182,12 @@ const Card = ({ children, style }) => (
 );
 
 const SBadge = ({ s }) => {
-  const roleMap = { superadmin:"Super Admin", admin:"Admin", contractor:"Contractor" };
+  const roleMap = { superadmin:"Super Admin", "Super Admin":"Super Admin", admin:"Admin", Admin:"Admin", contractor:"Contractor", Contractor:"Contractor" };
   const map = {
     Active:[C.greenBg,C.green], Inactive:[C.off,C.muted], Archived:["#F3F4F6","#6B7280"],
     Paid:[C.greenBg,C.green], Pending:[C.amberBg,C.amber],
     Approved:[C.greenBg,C.green], Rejected:[C.redBg,C.red],
-    superadmin:[C.amberBg,C.gold], admin:["#DBEAFE","#1D4ED8"], contractor:[C.off,C.muted],
+    superadmin:[C.amberBg,C.gold], "Super Admin":[C.amberBg,C.gold], admin:["#DBEAFE","#1D4ED8"], Admin:["#DBEAFE","#1D4ED8"], contractor:[C.off,C.muted], Contractor:[C.off,C.muted],
     LWOP:[C.amberBg,"#92400E"],
   };
   const [bg,col] = map[s] || [C.off,C.muted];
@@ -1069,9 +1073,9 @@ function ATeam({ user, contractors, setContractors, perms }) {
                             style={{ padding:"4px 8px", borderRadius:7, border:`1px solid ${C.border}`, fontSize:11, fontFamily:"inherit", outline:"none", background:"#fff", cursor:"pointer",
                               color: c.role==="superadmin"?C.gold : c.role==="admin"?"#1D4ED8" : C.muted,
                               fontWeight:700 }}>
-                            <option value="contractor">Contractor</option>
-                            <option value="admin">Admin</option>
-                            <option value="superadmin">Super Admin</option>
+                            <option value="Contractor">Contractor</option>
+                            <option value="Admin">Admin</option>
+                            <option value="Super Admin">Super Admin</option>
                           </select>
                         : <SBadge s={c.role}/>
                       }
@@ -1143,7 +1147,7 @@ function ContractorModal({ user, onClose, onSave, mode, existing }) {
               <FieldLabel>{label}</FieldLabel>
               <select value={form[key]||""} onChange={e=>set(key,e.target.value)} disabled={!isSA&&key==="role"}
                 style={{ width:"100%", padding:"10px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", background:"#fff", opacity:(!isSA&&key==="role")?0.5:1 }}>
-                {opts.map(o=><option key={o} value={o}>{o==="superadmin"?"Super Admin":o==="admin"?"Admin":"Contractor"}</option>)}
+                {opts.map(o=>{ const label=o==="superadmin"?"Super Admin":o==="admin"?"Admin":"Contractor"; const val=o==="superadmin"?"Super Admin":o==="admin"?"Admin":"Contractor"; return <option key={o} value={val}>{label}</option>; })}
               </select>
             </div>
           ))}
@@ -1898,9 +1902,9 @@ function ARolesAccess({ user, contractors, setContractors, perms, setPerms }) {
               {a.username!==user.username&&(
                 <select value={a.role} onChange={e=>{ changeRole(a.username,e.target.value); if(!DEMO_MODE) callScript('updateContractor',{username:a.username,role:e.target.value},()=>{},()=>{}); }}
                   style={{ padding:"6px 10px", borderRadius:7, border:`1px solid ${C.border}`, fontSize:12, fontFamily:"inherit", outline:"none", background:"#fff" }}>
-                  <option value="contractor">Contractor</option>
-                  <option value="admin">Admin</option>
-                  <option value="superadmin">Super Admin</option>
+                  <option value="Contractor">Contractor</option>
+                  <option value="Admin">Admin</option>
+                  <option value="Super Admin">Super Admin</option>
                 </select>
               )}
               {a.role==="admin"&&<button onClick={()=>openPerm(a)} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:7, padding:"6px 12px", fontSize:12, color:C.blue, fontWeight:600, cursor:"pointer" }}>Set Access</button>}
