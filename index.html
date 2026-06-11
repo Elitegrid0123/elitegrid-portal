@@ -2314,7 +2314,7 @@ function App() {
     }, 2 * 60 * 1000);
     // Log out at 3 minutes
     inactivityTimer.current = setTimeout(() => {
-      try { localStorage.removeItem("eg_session"); } catch(e) {}
+      try { localStorage.removeItem("eg_session"); localStorage.removeItem("eg_un"); localStorage.removeItem("eg_pw"); } catch(e) {}
       setShowTimeoutWarning(false);
       setCurrentUser(null); setPage("c-dashboard"); setChPwOpen(false);
     }, 3 * 60 * 1000);
@@ -2334,8 +2334,8 @@ function App() {
   // On refresh: re-fetch live data if session was restored from localStorage
   React.useEffect(() => {
     if (!currentUser || DEMO_MODE) return;
-    const un = currentUser._username || currentUser.username;
-    const pw = currentUser._password || currentUser.password;
+    const un = currentUser._username || currentUser.username || (()=>{ try{return localStorage.getItem("eg_un");}catch(e){return null;} })();
+    const pw = currentUser._password || currentUser.password || (()=>{ try{return localStorage.getItem("eg_pw");}catch(e){return null;} })();
     if (!un || !pw) return;
     // Always re-fetch on mount to get fresh live data
     callScript("login", {username: un, password: pw}, (json) => {
@@ -2399,12 +2399,17 @@ function App() {
         setContractors(u.allContractors);
       }
     }
-    try { localStorage.setItem("eg_session", JSON.stringify(u)); } catch(e) {}
+    try { 
+      localStorage.setItem("eg_session", JSON.stringify(u));
+      // Also save credentials separately for re-fetch on refresh
+      if (u._username) localStorage.setItem("eg_un", u._username);
+      if (u._password) localStorage.setItem("eg_pw", u._password);
+    } catch(e) {}
     setCurrentUser(u);
     setPage((u.role||u.profile&&u.profile.role)==="contractor"?"c-dashboard":"a-overview");
   };
 
-  const logout = () => { try { localStorage.removeItem("eg_session"); } catch(e) {} setCurrentUser(null); setPage("c-dashboard"); setChPwOpen(false); };
+  const logout = () => { try { localStorage.removeItem("eg_session"); localStorage.removeItem("eg_un"); localStorage.removeItem("eg_pw"); } catch(e) {} setCurrentUser(null); setPage("c-dashboard"); setChPwOpen(false); };
 
   if (!currentUser) return <LoginScreen onLogin={login}/>;
 
