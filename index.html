@@ -26,7 +26,7 @@ const { useState, useRef } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyUAAkATxjqtxtKUGUMNFPzVeFwL-XU4mkrMGAyMAMVbnBeMJLere9OCYgK__uz2iGk/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby2aM8FF67yeCpGP-Te-fXz3TzxseBsFWdlAGqGsfuS9PyxxfBuAVG0_zte1xxRtt2n/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -2281,7 +2281,13 @@ function App() {
   const [currentUser,   setCurrentUser]   = useState(() => {
     try {
       const saved = localStorage.getItem("eg_session");
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      const u = JSON.parse(saved);
+      // Normalize role on restore
+      if (u && u.role) {
+        u.role = u.role==="Super Admin"?"superadmin":u.role==="Admin"?"admin":u.role==="Contractor"?"contractor":u.role;
+      }
+      return u;
     } catch(e) { return null; }
   });
   const [page,          setPage]          = useState(() => {
@@ -2324,6 +2330,26 @@ function App() {
       if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
     };
   }, [currentUser, resetTimer]);
+
+  // On refresh: re-fetch live data if session was restored from localStorage
+  React.useEffect(() => {
+    if (!currentUser || DEMO_MODE) return;
+    const un = currentUser._username || currentUser.username;
+    const pw = currentUser._password || currentUser.password;
+    if (!un || !pw) return;
+    // Only re-fetch if we don't already have live contractors loaded
+    if (contractors.length > 0 && contractors[0] && contractors[0].username !== "jdelacruz") return;
+    callScript("login", {username: un, password: pw}, (json) => {
+      if (!json.success) return;
+      const u = json.data;
+      if (u.allContractors && u.allContractors.length > 0) setContractors(u.allContractors);
+      if (u.allLeaves && u.allLeaves.length > 0) setLeaves(u.allLeaves);
+      if (u.leaveRequests) setLeaves(u.leaveRequests);
+      if (u.clients && u.clients.length > 0) setClients(u.clients);
+      if (u.announcements) setAnnouncements(u.announcements);
+      if (u.payslips) setPayslips(u.payslips);
+    }, () => {});
+  }, []);
   const [contractors,   setContractors]   = useState([...INIT_CONTRACTORS]);
   const [payslips,      setPayslips]      = useState([...INIT_PAYSLIPS]);
   const [leaves,        setLeaves]        = useState([...INIT_LEAVES]);
@@ -2406,7 +2432,16 @@ function App() {
     slUsed:         currentUser.pto ? parseFloat(currentUser.pto.slUsed)||0 : 0,
     slPending:      currentUser.pto ? parseFloat(currentUser.pto.slPending)||0 : 0,
   } : null;
-  const contractor = liveContractor || contractors.find(c=>c.username===currentUser._username) || contractors[0];
+  const contractor = liveContractor || contractors.find(c=>c.username===currentUser._username) || contractors.find(c=>c.username===currentUser.username) || (contractors.length>0?contractors[0]:null);
+
+  // Safety: if no contractor found and we're a contractor role, show loading
+  if (isContractor && !contractor) {
+    return (
+      <div style={{ minHeight:"100vh", background:C.navy, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"inherit" }}>
+        <div style={{ color:"#fff", fontSize:16, fontWeight:600 }}>Loading your profile...</div>
+      </div>
+    );
+  }
 
   const contractorPages = {
     "c-dashboard":     <CDashboard    user={currentUser} contractor={contractor} leaves={leaves} setPage={setPage}/>,
