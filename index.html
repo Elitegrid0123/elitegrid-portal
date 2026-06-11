@@ -2337,8 +2337,7 @@ function App() {
     const un = currentUser._username || currentUser.username;
     const pw = currentUser._password || currentUser.password;
     if (!un || !pw) return;
-    // Only re-fetch if we don't already have live contractors loaded
-    if (contractors.length > 0 && contractors[0] && contractors[0].username !== "jdelacruz") return;
+    // Always re-fetch on mount to get fresh live data
     callScript("login", {username: un, password: pw}, (json) => {
       if (!json.success) return;
       const u = json.data;
