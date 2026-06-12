@@ -26,7 +26,7 @@ const { useState, useRef } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby91zkZuCCTeLszC5rKnye1jc54IBS2h7ODKS0rbeTXQOkhQV3G16XnitMMbfxKNBUW/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby2aM8FF67yeCpGP-Te-fXz3TzxseBsFWdlAGqGsfuS9PyxxfBuAVG0_zte1xxRtt2n/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -179,7 +179,8 @@ const normalizeRoleStr = (r) => {
 const getVisible = (user, contractors, perms) => {
   const role = normalizeRoleStr(user.role);
   if (role === "superadmin") return contractors;
-  const p = perms[user.username] || perms[user._username];
+  const uname = user.username || user._username || (user.profile && user.profile.username);
+  const p = perms[uname];
   if (!p || !p.assignedClients) return [];
   return contractors.filter(c => p.assignedClients.includes(c.client));
 };
@@ -2407,6 +2408,7 @@ function App() {
     // Flatten profile fields onto u for compatibility
     if (u.profile) {
       u.name     = u.profile.name;
+      u.username = u._username; // ensure username is always set for perms lookup
       // Normalize role to lowercase internal values
       const rawRole = u.profile.role || "contractor";
       u.role     = rawRole==="Super Admin"?"superadmin":rawRole==="Admin"?"admin":rawRole==="Contractor"?"contractor":rawRole.toLowerCase().replace(/\s+/g,"") || "contractor";
