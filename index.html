@@ -12,7 +12,11 @@
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html { font-size: 16px; }
-  body { font-family: 'Inter', 'Segoe UI', sans-serif; background: #F0F4F9; min-height: 100vh; }
+  body { font-family: 'Inter', 'Segoe UI', sans-serif; background: #F7F9FB; min-height: 100vh; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #D6E4F0; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #B0C8E0; }
   #root { min-height: 100vh; }
   select, input, textarea, button { font-family: inherit; }
 </style>
@@ -26,7 +30,7 @@ const { useState, useRef } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby2aM8FF67yeCpGP-Te-fXz3TzxseBsFWdlAGqGsfuS9PyxxfBuAVG0_zte1xxRtt2n/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwBtJQmfnCT8jRLWR1goBkDZxgFpqKC0qHupJlBJj9RoYpolRvIILBeh8b1ak2gX5DT/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -78,11 +82,25 @@ function callScript(action, params, onSuccess, onError) {
 // ════════════════════════════════════════════════════════
 
 const C = {
+  // Core
   navy:"#1B2A4A", navyLt:"#243659", cyan:"#5BC8E8",
-  blue:"#2E86C1", blueDk:"#1A5C8A", off:"#F0F4F9",
-  border:"#D6E4F0", muted:"#6B87A8", green:"#16A34A",
-  greenBg:"#DCFCE7", amber:"#D97706", amberBg:"#FEF3C7",
-  red:"#DC2626", redBg:"#FEE2E2", gold:"#F59E0B",
+  blue:"#2E86C1", blueDk:"#1A5C8A",
+  // Page backgrounds (Wise-style)
+  bg:"#F7F9FB",         // main content background
+  sidebar:"#1B2A4A",    // sidebar background (navy)
+  sidebarHover:"#243659",
+  off:"#F0F4F9",
+  white:"#FFFFFF",
+  // Borders & text
+  border:"#E8EFF5",
+  muted:"#6B87A8",
+  text:"#1A1F36",       // primary text (near black)
+  textSub:"#6B7C93",    // secondary text
+  // States
+  green:"#16A34A", greenBg:"#DCFCE7",
+  amber:"#D97706", amberBg:"#FEF3C7",
+  red:"#DC2626",   redBg:"#FEE2E2",
+  gold:"#F59E0B",
 };
 
 const ALL_CLIENTS = ["MCO","MFO","LCS","PHG","PPWS","J4K","Elite Grid"];
@@ -159,6 +177,33 @@ const roleLabel = (r) => r==="superadmin"||r==="Super Admin"?"Super Admin":r==="
 const isSuperAdmin = (r) => r==="superadmin"||r==="Super Admin";
 
 // Format a value as currency - handles numbers and strings
+// Philippine Time helpers
+const PHT_OFFSET = 8 * 60; // UTC+8 in minutes
+
+const nowPHT = () => {
+  const now = new Date();
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  return new Date(utc + PHT_OFFSET * 60000);
+};
+
+const formatPHT = (date, opts) => {
+  const d = date instanceof Date ? date : new Date(date);
+  return d.toLocaleDateString("en-PH", { timeZone:"Asia/Manila", ...opts });
+};
+
+const formatPHTTime = (date, opts) => {
+  const d = date instanceof Date ? date : new Date(date);
+  return d.toLocaleString("en-PH", { timeZone:"Asia/Manila", ...opts });
+};
+
+const todayPHT = () => {
+  const d = nowPHT();
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const day = String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+};
+
 const fmtCur = (v) => {
   if (v === null || v === undefined || v === "") return "-";
   // Handle raw numbers from Sheet (e.g. 10 instead of "$10.00")
@@ -203,7 +248,7 @@ const Logo = ({ size=36 }) => (
 );
 
 const Card = ({ children, style }) => (
-  <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${C.border}`, padding:24, ...style }}>{children}</div>
+  <div style={{ background:C.white, borderRadius:12, border:`1px solid ${C.border}`, padding:24, boxShadow:"0 1px 4px rgba(0,0,0,0.04)", ...style }}>{children}</div>
 );
 
 const SBadge = ({ s }) => {
@@ -212,7 +257,7 @@ const SBadge = ({ s }) => {
     Active:[C.greenBg,C.green], Inactive:[C.off,C.muted], Archived:["#F3F4F6","#6B7280"],
     Paid:[C.greenBg,C.green], Pending:[C.amberBg,C.amber],
     Approved:[C.greenBg,C.green], Rejected:[C.redBg,C.red],
-    superadmin:[C.amberBg,C.gold], "Super Admin":[C.amberBg,C.gold], admin:["#DBEAFE","#1D4ED8"], Admin:["#DBEAFE","#1D4ED8"], contractor:[C.off,C.muted], Contractor:[C.off,C.muted],
+    superadmin:[C.amberBg,C.gold], "Super Admin":[C.amberBg,C.gold], admin:["#DBEAFE","#1D4ED8"], Admin:["#DBEAFE","#1D4ED8"], contractor:["#EEF2F7",C.muted], Contractor:["#EEF2F7",C.muted],
     LWOP:[C.amberBg,"#92400E"],
   };
   const [bg,col] = map[s] || [C.off,C.muted];
@@ -233,13 +278,13 @@ const FieldLabel = ({ children, required }) => (
 );
 
 const FieldInput = ({ style, ...props }) => (
-  <input style={{ width:"100%", padding:"10px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box", ...style }} {...props} />
+  <input style={{ width:"100%", padding:"10px 14px", borderRadius:10, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", boxSizing:"border-box", background:"#fff", transition:"border-color 0.15s", ...style }} {...props} />
 );
 
 const Btn = ({ children, onClick, variant="primary", disabled, style }) => {
   const styles = {
-    primary:  { background:`linear-gradient(135deg,${C.blue},${C.blueDk})`, color:"#fff", border:"none" },
-    secondary:{ background:"#fff", color:C.muted, border:`1.5px solid ${C.border}` },
+    primary:  { background:`linear-gradient(135deg,${C.blue},${C.blueDk})`, color:"#fff", border:"none", boxShadow:"0 2px 8px rgba(46,134,193,0.3)" },
+    secondary:{ background:C.white, color:C.text, border:`1.5px solid ${C.border}` },
     danger:   { background:C.redBg, color:C.red, border:"1px solid #FECACA" },
     success:  { background:C.greenBg, color:C.green, border:"1px solid #86EFAC" },
     ghost:    { background:"transparent", color:C.muted, border:"1px solid #3A5070" },
@@ -247,7 +292,7 @@ const Btn = ({ children, onClick, variant="primary", disabled, style }) => {
   };
   return (
     <button onClick={onClick} disabled={disabled}
-      style={{ ...styles[variant], borderRadius:8, padding:"10px 18px", fontSize:13, fontWeight:700, fontFamily:"inherit", cursor:disabled?"not-allowed":"pointer", opacity:disabled?0.6:1, ...style }}>
+      style={{ ...styles[variant], borderRadius:24, padding:"9px 20px", fontSize:13, fontWeight:700, fontFamily:"inherit", cursor:disabled?"not-allowed":"pointer", opacity:disabled?0.6:1, transition:"all 0.15s", ...style }}>
       {children}
     </button>
   );
@@ -377,7 +422,7 @@ function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div style={{ minHeight:"100vh", background:C.navy, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px 16px", fontFamily:"'Inter',sans-serif" }}>
+    <div style={{ minHeight:"100vh", background:`linear-gradient(135deg,${C.navy} 0%,${C.navyLt} 40%,#1d3a6b 100%)`, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px 16px", fontFamily:"'Inter',sans-serif" }}>
       <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:36 }}>
         <Logo size={48}/>
         <div>
@@ -474,126 +519,142 @@ function PasswordInput({ value, onChange, onKeyDown, placeholder, style }) {
 // ── CONTRACTOR NAV ────────────────────────────────────────
 function ContractorNav({ page, setPage, user, onLogout, onChPw, notifications, onClearNotifs, onMarkRead }) {
   const tabs = [
-    { id:"c-dashboard",     label:"Dashboard" },
-    { id:"c-profile",       label:"My Profile" },
-    { id:"c-payslips",      label:"Payslips" },
-    { id:"c-pto",           label:"PTO & Leave" },
-    { id:"c-leave",         label:"My Leave" },
-    { id:"c-announcements", label:"Announcements" },
+    { id:"c-dashboard",     label:"Dashboard",     icon:"⊞" },
+    { id:"c-profile",       label:"My Profile",    icon:"◉" },
+    { id:"c-payslips",      label:"Payslips",      icon:"₱" },
+    { id:"c-pto",           label:"PTO Balances",  icon:"◷" },
+    { id:"c-leave",         label:"My Leave",      icon:"✦" },
+    { id:"c-announcements", label:"Announcements", icon:"◈" },
   ];
   return (
-    <div style={{ background:C.navy, padding:"0 20px", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:6, position:"sticky", top:0, zIndex:50, boxShadow:"0 2px 12px rgba(0,0,0,0.25)" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"13px 0" }}>
-        <Logo size={30}/>
-        <span style={{ color:"#fff", fontWeight:800, fontSize:15, letterSpacing:1 }}>ELITE GRID</span>
+    <div style={{ width:240, minHeight:"100vh", background:C.navy, display:"flex", flexDirection:"column", position:"fixed", top:0, left:0, zIndex:50, boxShadow:"2px 0 12px rgba(0,0,0,0.15)" }}>
+      {/* Logo */}
+      <div style={{ padding:"24px 20px 20px", borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <Logo size={34}/>
+          <div>
+            <div style={{ color:"#fff", fontWeight:800, fontSize:13, letterSpacing:1 }}>ELITE GRID</div>
+            <div style={{ color:C.cyan, fontSize:9, letterSpacing:2, fontWeight:600 }}>TEAM PORTAL</div>
+          </div>
+        </div>
       </div>
-      <div style={{ display:"flex", gap:2, flexWrap:"wrap" }}>
+      {/* Nav links */}
+      <nav style={{ flex:1, padding:"12px 8px", overflowY:"auto" }}>
         {tabs.map(t => (
           <button key={t.id} onClick={()=>setPage(t.id)}
-            style={{ background:page===t.id?C.cyan:"transparent", color:page===t.id?C.navy:"#8AAABF", border:"none", borderRadius:7, padding:"8px 13px", fontSize:13, fontWeight:page===t.id?700:500, cursor:"pointer", fontFamily:"inherit" }}>
+            style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderRadius:10, border:"none", background:page===t.id?"rgba(91,200,232,0.15)":"transparent", color:page===t.id?C.cyan:"#8AAABF", fontSize:13, fontWeight:page===t.id?700:400, cursor:"pointer", fontFamily:"inherit", marginBottom:2, textAlign:"left", transition:"all 0.15s" }}>
+            <span style={{ fontSize:15, width:18, textAlign:"center" }}>{t.icon}</span>
             {t.label}
+            {page===t.id && <div style={{ marginLeft:"auto", width:3, height:16, background:C.cyan, borderRadius:2 }}/>}
           </button>
         ))}
-      </div>
-      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-        <span style={{ color:"#8AAABF", fontSize:13 }}>{user.name.split(" ")[0]}</span>
-        <NotificationBell notifications={notifications||[]} onClear={onClearNotifs} onMarkRead={onMarkRead}/>
-        <button onClick={onChPw} style={{ background:"transparent", border:`1px solid ${C.blue}`, color:C.cyan, borderRadius:7, padding:"6px 12px", fontSize:12, cursor:"pointer", fontFamily:"inherit", fontWeight:600 }}>Password</button>
-        <button onClick={onLogout} style={{ background:"transparent", border:"1px solid #3A5070", color:"#8AAABF", borderRadius:7, padding:"6px 12px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>Sign Out</button>
+      </nav>
+      {/* Bottom: user info + actions */}
+      <div style={{ padding:"16px 12px", borderTop:"1px solid rgba(255,255,255,0.08)" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, padding:"8px 10px", background:"rgba(255,255,255,0.05)", borderRadius:10 }}>
+          <Avatar name={user.name} photoUrl={user.photoUrl} size={32}/>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ color:"#fff", fontSize:12, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{user.name.split(" ")[0]}</div>
+            <div style={{ color:C.muted, fontSize:10 }}>Contractor</div>
+          </div>
+          <NotificationBell notifications={notifications||[]} onClear={onClearNotifs} onMarkRead={onMarkRead}/>
+        </div>
+        <button onClick={onChPw} style={{ width:"100%", background:"transparent", border:"1px solid rgba(255,255,255,0.12)", borderRadius:8, padding:"7px", color:"#8AAABF", fontSize:12, cursor:"pointer", fontFamily:"inherit", marginBottom:6 }}>Change Password</button>
+        <button onClick={onLogout} style={{ width:"100%", background:"transparent", border:"none", borderRadius:8, padding:"7px", color:C.muted, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>Sign Out</button>
       </div>
     </div>
   );
 }
 
-// ── ADMIN NAV WITH GROUPED DROPDOWNS ─────────────────────
+
+// ── ADMIN NAV WITH SIDEBAR ────────────────────────────────
 function AdminNav({ page, setPage, user, onLogout, notifications, onClearNotifs, onMarkRead }) {
   const [openGroup, setOpenGroup] = useState(null);
-  const isSA = normalizeRoleStr(user.role) === "superadmin";
+  const isSA = user.role === "superadmin";
 
   const groups = [
-    { id:"overview", label:"Overview", direct:"a-overview" },
-    { id:"team", label:"Team", items:[
+    { id:"a-overview", label:"Overview",    icon:"⊞", direct:true },
+    { id:"team",       label:"Team",        icon:"◉", items:[
       { id:"a-team",    label:"Contractors" },
       { id:"a-clients", label:"Clients" },
       ...(isSA?[{ id:"a-roles", label:"Roles & Access" }]:[]),
     ]},
-    { id:"leave", label:"Leave", items:[
+    { id:"leave",      label:"Leave",       icon:"◷", items:[
       { id:"a-leave",    label:"Approvals" },
       { id:"a-pto",      label:"PTO Management" },
       { id:"a-calendar", label:"Leave Calendar" },
     ]},
-    { id:"finance", label:"Finance", items:[
+    { id:"finance",    label:"Finance",     icon:"₱", items:[
       { id:"a-payslips", label:"Payslips" },
       { id:"a-audit",    label:"Audit Log" },
     ]},
-    { id:"comms", label:"Comms", items:[
+    { id:"comms",      label:"Comms",       icon:"◈", items:[
       { id:"a-announce", label:"Announcements" },
       { id:"a-email",    label:"Email Blast" },
     ]},
   ];
 
-  const activeGroup = groups.find(g => (g.items && g.items.find(i=>i.id===page)));
-  const toggle = (id) => setOpenGroup(o=>o===id?null:id);
-
-  const NavBtn = ({ id, label, active, gold, onClick }) => (
-    <button onClick={onClick}
-      style={{ background:active?C.cyan:"transparent", color:active?C.navy:gold?C.gold:"#8AAABF", border:"none", borderRadius:7, padding:"8px 13px", fontSize:12, fontWeight:active?700:500, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap", display:"flex", alignItems:"center", gap:4 }}>
-      {label}
-    </button>
-  );
+  const activeGroup = groups.find(g => g.items && g.items.find(i=>i.id===page));
 
   return (
-    <div style={{ background:C.navy, padding:"0 20px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:50, boxShadow:"0 2px 16px rgba(0,0,0,0.3)", minHeight:52 }}>
-      {/* Brand */}
-      <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
-        <Logo size={30}/>
-        <div>
-          <div style={{ color:"#fff", fontWeight:800, fontSize:14, letterSpacing:1 }}>ELITE GRID</div>
-          <div style={{ color:C.cyan, fontSize:9, letterSpacing:2, fontWeight:600 }}>ADMIN PANEL</div>
-        </div>
-      </div>
-
-      {/* Nav groups */}
-      <div style={{ display:"flex", gap:2, alignItems:"center" }} onMouseLeave={()=>setOpenGroup(null)}>
-        {groups.map(g => (
-          <div key={g.id} style={{ position:"relative" }}>
-            {g.direct
-              ? <NavBtn id={g.direct} label={g.label} active={page===g.direct} onClick={()=>{ setPage(g.direct); setOpenGroup(null); }}/>
-              : <NavBtn
-                  id={g.id}
-                  label={g.label + " ▾"}
-                  active={activeGroup && activeGroup.id===g.id}
-                  gold={g.id==="roles"}
-                  onClick={()=>toggle(g.id)}
-                />
-            }
-            {!g.direct && openGroup===g.id && (
-              <div style={{ position:"absolute", top:"100%", left:0, background:C.navyLt, borderRadius:10, padding:6, minWidth:170, boxShadow:"0 8px 32px rgba(0,0,0,0.35)", zIndex:100, border:`1px solid rgba(255,255,255,0.08)` }}>
-                {g.items.map(item=>(
-                  <button key={item.id} onClick={()=>{ setPage(item.id); setOpenGroup(null); }}
-                    style={{ display:"block", width:"100%", textAlign:"left", background:page===item.id?"rgba(91,200,232,0.15)":"transparent", color:page===item.id?C.cyan:"#C4D6E8", border:"none", borderRadius:7, padding:"9px 14px", fontSize:13, fontWeight:page===item.id?700:400, cursor:"pointer", fontFamily:"inherit" }}>
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            )}
+    <div style={{ width:240, minHeight:"100vh", background:C.navy, display:"flex", flexDirection:"column", position:"fixed", top:0, left:0, zIndex:50, boxShadow:"2px 0 12px rgba(0,0,0,0.15)" }}>
+      {/* Logo */}
+      <div style={{ padding:"24px 20px 20px", borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <Logo size={34}/>
+          <div>
+            <div style={{ color:"#fff", fontWeight:800, fontSize:13, letterSpacing:1 }}>ELITE GRID</div>
+            <div style={{ color:C.cyan, fontSize:9, letterSpacing:2, fontWeight:600 }}>ADMIN PANEL</div>
           </div>
-        ))}
+        </div>
       </div>
 
-      {/* User + logout */}
-      <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
-        <div style={{ textAlign:"right" }}>
-          <div style={{ color:"#fff", fontSize:13, fontWeight:600 }}>{user.name.split(" ")[0]}</div>
-          <div style={{ display:"flex", justifyContent:"flex-end", marginTop:2 }}><SBadge s={user.role}/></div>
+      {/* Nav */}
+      <nav style={{ flex:1, padding:"12px 8px", overflowY:"auto" }}>
+        {groups.map(g => {
+          const isActive = g.direct ? page===g.id : !!(activeGroup && activeGroup.id===g.id);
+          const isOpen = openGroup===g.id;
+          return (
+            <div key={g.id} style={{ marginBottom:2 }}>
+              <button
+                onClick={()=>{ if(g.direct){setPage(g.id);setOpenGroup(null);}else{setOpenGroup(isOpen?null:g.id);} }}
+                style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderRadius:10, border:"none", background:isActive?"rgba(91,200,232,0.15)":"transparent", color:isActive?C.cyan:"#8AAABF", fontSize:13, fontWeight:isActive?700:400, cursor:"pointer", fontFamily:"inherit", textAlign:"left", transition:"all 0.15s" }}>
+                <span style={{ fontSize:15, width:18, textAlign:"center" }}>{g.icon}</span>
+                <span style={{ flex:1 }}>{g.label}</span>
+                {!g.direct && <span style={{ fontSize:10, transition:"transform 0.2s", display:"inline-block", transform:isOpen?"rotate(90deg)":"rotate(0deg)" }}>›</span>}
+                {g.direct && isActive && <div style={{ width:3, height:16, background:C.cyan, borderRadius:2 }}/>}
+              </button>
+              {!g.direct && isOpen && (
+                <div style={{ paddingLeft:16, marginTop:2 }}>
+                  {g.items.map(item=>(
+                    <button key={item.id} onClick={()=>{ setPage(item.id); setOpenGroup(null); }}
+                      style={{ width:"100%", display:"flex", alignItems:"center", gap:8, padding:"8px 14px", borderRadius:8, border:"none", background:page===item.id?"rgba(91,200,232,0.12)":"transparent", color:page===item.id?C.cyan:"#7A96B0", fontSize:12, fontWeight:page===item.id?700:400, cursor:"pointer", fontFamily:"inherit", textAlign:"left", marginBottom:1, transition:"all 0.15s" }}>
+                      {page===item.id && <div style={{ width:3, height:12, background:C.cyan, borderRadius:2 }}/>}
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </nav>
+
+      {/* Bottom: user */}
+      <div style={{ padding:"16px 12px", borderTop:"1px solid rgba(255,255,255,0.08)" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, padding:"8px 10px", background:"rgba(255,255,255,0.05)", borderRadius:10 }}>
+          <Avatar name={user.name} photoUrl={user.photoUrl} size={32}/>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ color:"#fff", fontSize:12, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{user.name.split(" ")[0]}</div>
+            <div style={{ color:C.muted, fontSize:10 }}>{user.role==="superadmin"?"Super Admin":"Admin"}</div>
+          </div>
+          <NotificationBell notifications={notifications||[]} onClear={onClearNotifs} onMarkRead={onMarkRead}/>
         </div>
-        <NotificationBell notifications={notifications||[]} onClear={onClearNotifs} onMarkRead={onMarkRead}/>
-        <button onClick={onLogout} style={{ background:"transparent", border:"1px solid #3A5070", color:"#8AAABF", borderRadius:7, padding:"6px 12px", fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>Sign Out</button>
+        <button onClick={onLogout} style={{ width:"100%", background:"transparent", border:"none", borderRadius:8, padding:"7px", color:C.muted, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>Sign Out</button>
       </div>
     </div>
   );
 }
-
 
 // ── CHANGE PASSWORD ───────────────────────────────────────
 function ChangePwModal({ user, onClose }) {
@@ -733,7 +794,7 @@ function ContractorDocs({ contractor, user, canManage }) {
       docName:   form.docName,
       category:  form.category,
       driveLink: form.driveLink,
-      dateAdded: new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
+      dateAdded: formatPHT(nowPHT(),{month:"short",day:"numeric",year:"numeric"}),
       uploadedBy: user.name || user._username,
     };
     if (!DEMO_MODE) {
@@ -1046,7 +1107,7 @@ function CLeave({ user, contractor, leaves, setLeaves, setContractors, onContrac
     if (!isHalf&&!end) { setErr("Please select an end date."); return; }
     if (!isHalf&&new Date(end)<new Date(start)) { setErr("End date cannot be before start date. Please check your dates."); return; }
     if (!isHalf&&days===0) { setErr("No working days in selected range (Mon-Fri only)."); return; }
-    if (lvType==="VL"&&new Date(start)<new Date()) { setErr("Vacation Leave must be filed before your leave date."); return; }
+    if (lvType==="VL"&&start<todayPHT()) { setErr("Vacation Leave must be filed before your leave date."); return; }
     if (lvType==="VL" && !approvalFile) { setErr("Vacation Leave requires a supervisor approval attachment. Please attach the approval email or document."); return; }
     // Check if contractor has enough leave credits
     if (hours > 0 && balance <= 0) {
@@ -1063,7 +1124,7 @@ function CLeave({ user, contractor, leaves, setLeaves, setContractors, onContrac
         leaveId:"LV-"+Date.now(), username:user.username, name:user.name,
         leaveType:lvType, isHalfDay:isHalf, start, end:isHalf?start:end,
         days:isHalf?1:days, hours, reason, status:"Pending",
-        filedOn:new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
+        filedOn:formatPHT(nowPHT(),{month:"short",day:"numeric",year:"numeric"}),
         actionedBy:"", isLWOP, needsMedCert,
         approvalAttachment: approvalFile||"",
         approvalFileName: approvalPreview||"",
@@ -1177,7 +1238,7 @@ function CLeave({ user, contractor, leaves, setLeaves, setContractors, onContrac
                       <td style={{ padding:"11px 14px" }}>
                         <span style={{ background:"#DBEAFE", color:"#1D4ED8", fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:20 }}>{l.leaveType}{l.isHalfDay?" HD":""}</span>
                       </td>
-                      <td style={{ padding:"11px 14px", fontSize:13 }}>{l.start}{!l.isHalfDay&&l.end!==l.start?" to "+l.end:""}</td>
+                      <td style={{ padding:"11px 14px", fontSize:13 }}>{String(l.start).substring(0,10)}{!l.isHalfDay&&l.end!==l.start?" to "+String(l.end).substring(0,10):""}</td>
                       <td style={{ padding:"11px 14px", fontWeight:600 }}>{l.isHalfDay?"0.5":l.days}</td>
                       <td style={{ padding:"11px 14px" }}>{l.hours} hrs</td>
                       <td style={{ padding:"11px 14px", fontSize:12, color:C.muted }}>{l.filedOn}</td>
@@ -1248,7 +1309,7 @@ function AOverview({ user, contractors, leaves, perms, setPage, announcements })
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:14, marginBottom:24 }}>
         {stats.map(s => (
           <div key={s.label} onClick={()=>setPage(s.page)}
-            style={{ background:"#fff", borderRadius:12, padding:20, border:`1px solid ${C.border}`, borderLeft:`4px solid ${s.color}`, cursor:"pointer", transition:"box-shadow 0.15s" }}>
+            style={{ background:C.white, borderRadius:14, padding:22, border:`1px solid ${C.border}`, borderLeft:`4px solid ${s.color}`, cursor:"pointer", transition:"all 0.15s", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
             <div style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.6px", marginBottom:8 }}>{s.label}</div>
             <div style={{ fontSize:32, fontWeight:900, color:s.color, marginBottom:4 }}>{s.value}</div>
             <div style={{ fontSize:12, color:C.muted }}>{s.sub}</div>
@@ -1271,7 +1332,7 @@ function AOverview({ user, contractors, leaves, perms, setPage, announcements })
                 <div style={{ fontWeight:600, fontSize:14, color:C.navy, marginBottom:3 }}>{l.name}</div>
                 <div style={{ fontSize:13, color:C.muted, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
                   <span style={{ background:"#DBEAFE", color:"#1D4ED8", fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:20 }}>{l.leaveType}{l.isHalfDay?" (Half)":""}</span>
-                  {l.start}{l.end!==l.start?" to "+l.end:""} - {l.hours} hrs
+                  {String(l.start).substring(0,10)}{l.end!==l.start?" to "+String(l.end).substring(0,10):""} - {l.hours} hrs
                   {l.isLWOP&&<SBadge s="LWOP"/>}
                   {l.needsMedCert&&<span style={{ background:"#FEF3C7", color:"#92400E", fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:20 }}>Med Cert</span>}
                 </div>
@@ -1659,11 +1720,17 @@ function ALeaveCalendar({ leaves, contractors, perms, user }) {
   const approvedLeaves = leaves.filter(l=>l.status==="Approved"||l.status==="Pending");
 
   const getLeavesForDay = (day) => {
-    const d = new Date(year, month, day);
+    // Use date strings for comparison to avoid timezone issues
+    // Pad month/day to YYYY-MM-DD format
+    const pad = (n) => String(n).padStart(2,"0");
+    const dStr = `${year}-${pad(month+1)}-${pad(day)}`;
     return approvedLeaves.filter(l => {
-      const start = new Date(l.start);
-      const end   = new Date(l.end||l.start);
-      return d >= start && d <= end && visible.find(c=>c.username===l.username);
+      // Normalize start/end to YYYY-MM-DD regardless of ISO or plain format
+      const normDate = (v) => v ? String(v).substring(0,10) : "";
+      const startStr = normDate(l.start);
+      const endStr   = normDate(l.end||l.start);
+      if (!startStr) return false;
+      return dStr >= startStr && dStr <= endStr && visible.find(c=>c.username===l.username);
     });
   };
 
@@ -1724,8 +1791,8 @@ function ALeaveCalendar({ leaves, contractors, perms, user }) {
                       const bg = l.status==="Pending" ? C.amberBg : (colorMap[c&&c.client]||C.blue);
                       const col = l.status==="Pending" ? C.amber : "#fff";
                       return (
-                        <div key={j} style={{ background:bg, color:col, fontSize:9, fontWeight:700, padding:"2px 5px", borderRadius:4, marginBottom:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                          {c?c.name.split(" ")[0]:l.username} {l.isHalfDay?"½":""}
+                        <div key={j} title={c?c.name:l.username} style={{ background:bg, color:col, fontSize:9, fontWeight:700, padding:"2px 5px", borderRadius:4, marginBottom:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                          {c?c.name.split(" ")[0]:l.username.split("")[0]} {l.isHalfDay?"½":l.leaveType==="VL"?"VL":"SL"}
                         </div>
                       );
                     })}
@@ -1750,7 +1817,7 @@ function ALeaveApprovals({ user, leaves, setLeaves, setContractors, contractors,
 
   const action = (leaveId, act) => {
     const leave = leaves.find(l=>l.leaveId===leaveId); if(!leave)return;
-    const dated = user.name+" - "+new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+    const dated = user.name+" - "+formatPHT(nowPHT(),{month:"short",day:"numeric",year:"numeric"});
     if (!DEMO_MODE) callScript(act==="approve"?"approveLeave":"rejectLeave", {leaveId, adminName:user.name}, ()=>{}, ()=>{});
     setLeaves(prev=>prev.map(l=>l.leaveId===leaveId?{...l,status:act==="approve"?"Approved":"Rejected",actionedBy:dated}:l));
     if (onNotify) onNotify("Leave "+(act==="approve"?"Approved":"Rejected"), leave.name+"'s "+leave.leaveType+" request was "+(act==="approve"?"approved":"rejected")+".");
@@ -1793,7 +1860,7 @@ function ALeaveApprovals({ user, leaves, setLeaves, setContractors, contractors,
                 <div style={{ fontWeight:700, fontSize:15, color:C.navy, marginBottom:5 }}>{l.name} <span style={{ fontWeight:400, color:C.muted, fontSize:13 }}>@{l.username}</span></div>
                 <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", fontSize:13, color:C.muted }}>
                   <span style={{ background:"#DBEAFE", color:"#1D4ED8", fontSize:10, fontWeight:700, padding:"2px 9px", borderRadius:20 }}>{l.leaveType}{l.isHalfDay?" - Half Day":""}</span>
-                  {l.start}{l.end!==l.start?" to "+l.end:""} - <b style={{ color:C.navy }}>{l.isHalfDay?"0.5 day":l.days+" day"+(l.days>1?"s":"")} ({l.hours} hrs)</b>
+                  {String(l.start).substring(0,10)}{l.end!==l.start?" to "+String(l.end).substring(0,10):""} - <b style={{ color:C.navy }}>{l.isHalfDay?"0.5 day":l.days+" day"+(l.days>1?"s":"")} ({l.hours} hrs)</b>
                   {l.reason&&<span>- "{l.reason}"</span>}
                   {l.approvalFileName&&<span style={{background:"#DCFCE7",color:"#16A34A",fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20}}>📎 {l.approvalFileName}</span>}
                   {l.isLWOP&&<SBadge s="LWOP"/>}
@@ -1835,7 +1902,7 @@ function APTOManagement({ user, contractors, setContractors, auditLog, setAuditL
     const newVal = parseFloat(adjValue);
     if (adjField==="vlAccrued"&&newVal>200) { setAdjErr("VL cannot exceed 200 hours (25 day cap)."); return; }
     const oldVal = sel[adjField];
-    const entry = { id:"AUD-"+Date.now(), admin:user.name, contractor:sel.username, field:adjField, oldVal, newVal, reason:adjReason, timestamp:new Date().toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}), notified:true };
+    const entry = { id:"AUD-"+Date.now(), admin:user.name, contractor:sel.username, field:adjField, oldVal, newVal, reason:adjReason, timestamp:formatPHTTime(nowPHT(),{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}), notified:true };
     if (!DEMO_MODE) callScript("adjustPTO", {adminUsername:user.username||user._username, contractorUsername:sel.username, field:adjField, newValue:newVal, reason:adjReason}, ()=>{}, ()=>{});
     setAuditLog(prev=>[entry,...prev]);
     setContractors(prev=>prev.map(c=>c.username===sel.username?{...c,[adjField]:newVal}:c));
@@ -1929,7 +1996,7 @@ function AAnnouncements({ user, announcements, setAnnouncements }) {
 
   const post = () => {
     if (!title.trim()||!body.trim()) { setErr("Title and body are required."); return; }
-    const newAnn = { annId:"ANN-"+Date.now(), title, body, tag, tagColor, date:new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}), postedBy:user.name };
+    const newAnn = { annId:"ANN-"+Date.now(), title, body, tag, tagColor, date:formatPHT(nowPHT(),{month:"short",day:"numeric",year:"numeric"}), postedBy:user.name };
     if (!DEMO_MODE) callScript("postAnnouncement", {title, body, tag, tagColor, postedBy:user.name}, ()=>{}, ()=>{});
     setAnnouncements(prev=>[newAnn,...prev]);
     setTitle(""); setBody(""); setShowForm(false); setErr("");
@@ -1984,123 +2051,171 @@ function AAnnouncements({ user, announcements, setAnnouncements }) {
 
 // ── EMAIL BLAST ───────────────────────────────────────────
 function AEmailBlast({ user, contractors, perms }) {
-  const [subject,   setSubject]   = useState("");
-  const [body,      setBody]      = useState("");
-  const [targetGroup, setTargetGroup] = useState("all");
-  const [selectedClients, setSelectedClients] = useState([]);
-  const [err,       setErr]       = useState("");
-  const [sent,      setSent]      = useState(false);
-  const [loading,   setLoading]   = useState(false);
+  const [subject,        setSubject]       = useState("");
+  const [body,           setBody]          = useState("");
+  const [targetGroup,    setTargetGroup]   = useState("all");
+  const [selectedClients,setSelectedClients]= useState([]);
+  const [selectedUsers,  setSelectedUsers] = useState([]);
+  const [search,         setSearch]        = useState("");
+  const [err,            setErr]           = useState("");
+  const [sent,           setSent]          = useState(false);
+  const [loading,        setLoading]       = useState(false);
 
+  const ALL_CLIENTS_WITH_INTERNAL = [...ALL_CLIENTS, "Internal"];
   const active = getVisible(user,contractors,perms).filter(c=>c.status==="Active"&&c.role==="contractor");
+  const clientsInScope = [...new Set(active.map(c=>c.client))];
 
-  const recipients = targetGroup==="all"
-    ? active
-    : active.filter(c=>selectedClients.includes(c.client));
+  const recipients = (() => {
+    if (targetGroup==="individual") {
+      return active.filter(c=>selectedUsers.includes(c.username));
+    }
+    if (targetGroup==="byClient") {
+      return active.filter(c=>selectedClients.includes(c.client));
+    }
+    return active; // all
+  })();
 
-  const toggleClient = (cl) => setSelectedClients(prev=>prev.includes(cl)?prev.filter(c=>c!==cl):[...prev,cl]);
+  const filteredForList = active.filter(c=>
+    c.name.toLowerCase().includes(search.toLowerCase()) ||
+    c.username.toLowerCase().includes(search.toLowerCase()) ||
+    c.client.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const toggleClient = (cl) => setSelectedClients(p=>p.includes(cl)?p.filter(c=>c!==cl):[...p,cl]);
+  const toggleUser   = (un) => setSelectedUsers(p=>p.includes(un)?p.filter(u=>u!==un):[...p,un]);
+  const selectAll    = () => setSelectedUsers(filteredForList.map(c=>c.username));
+  const clearAll     = () => setSelectedUsers([]);
 
   const send = () => {
     setErr("");
     if (!subject.trim()) { setErr("Please enter a subject."); return; }
-    if (!body.trim())    { setErr("Please enter a message body."); return; }
-    if (recipients.length===0) { setErr("No recipients selected. Please check your filters."); return; }
+    if (!body.trim())    { setErr("Please enter a message."); return; }
+    if (recipients.length===0) { setErr("No recipients selected."); return; }
     setLoading(true);
     setTimeout(()=>{ setSent(true); setLoading(false); },800);
   };
 
-  const reset = () => { setSubject(""); setBody(""); setTargetGroup("all"); setSelectedClients([]); setSent(false); setErr(""); };
+  const reset = () => { setSubject(""); setBody(""); setTargetGroup("all"); setSelectedClients([]); setSelectedUsers([]); setSearch(""); setSent(false); setErr(""); };
 
-  const clientsInScope = [...new Set(active.map(c=>c.client))];
+  if (sent) return (
+    <div style={{ padding:"28px 20px", maxWidth:700, margin:"0 auto" }}>
+      <Card style={{ textAlign:"center", padding:48 }}>
+        <div style={{ fontSize:48, marginBottom:16 }}>✓</div>
+        <div style={{ fontSize:20, fontWeight:800, color:C.green, marginBottom:8 }}>Email Sent</div>
+        <div style={{ fontSize:14, color:C.muted, marginBottom:24 }}>Sent to <b>{recipients.length} contractor{recipients.length!==1?"s":""}</b> from <b style={{color:C.blue}}>hr@elitegrid.co</b></div>
+        <div style={{ background:C.off, borderRadius:10, padding:16, marginBottom:24, textAlign:"left", maxHeight:200, overflowY:"auto" }}>
+          <div style={{ fontSize:12, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:8 }}>Recipients</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+            {recipients.map(c=>(
+              <div key={c.username} style={{ display:"flex", alignItems:"center", gap:6, background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, padding:"5px 10px" }}>
+                <Avatar name={c.name} photoUrl={c.photoUrl} size={22}/>
+                <span style={{ fontSize:12, fontWeight:600 }}>{c.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <Btn onClick={reset} style={{ padding:"10px 28px" }}>Send Another</Btn>
+      </Card>
+    </div>
+  );
 
   return (
-    <div style={{ padding:"28px 20px", maxWidth:760, margin:"0 auto" }}>
+    <div style={{ padding:"28px 20px", maxWidth:960, margin:"0 auto" }}>
       <div style={{ fontSize:20, fontWeight:800, marginBottom:6 }}>Email Blast</div>
-      <div style={{ fontSize:14, color:C.muted, marginBottom:24 }}>Send an email to active contractors. Emails are sent from hr@elitegrid.co.</div>
-
-      {sent ? (
-        <Card style={{ textAlign:"center", padding:48 }}>
-          <div style={{ fontSize:48, marginBottom:16 }}>✓</div>
-          <div style={{ fontSize:20, fontWeight:800, color:C.green, marginBottom:8 }}>Email Sent</div>
-          <div style={{ fontSize:14, color:C.muted, marginBottom:24 }}>
-            Your message was sent to <b>{recipients.length} contractor{recipients.length!==1?"s":""}</b> from hr@elitegrid.co.
-            <br/>(Demo mode - in production this sends real emails.)
+      <div style={{ fontSize:14, color:C.muted, marginBottom:24 }}>Send an email to contractors from hr@elitegrid.co.</div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:20, alignItems:"start" }}>
+        {/* Compose */}
+        <Card>
+          <div style={{ fontSize:15, fontWeight:700, marginBottom:16 }}>Compose Email</div>
+          {err&&<Alert type="error">{err}</Alert>}
+          <FieldLabel required>Subject</FieldLabel>
+          <FieldInput value={subject} onChange={e=>setSubject(e.target.value)} placeholder="e.g. Important Payroll Update" style={{ marginBottom:14 }}/>
+          <FieldLabel required>Message</FieldLabel>
+          <textarea value={body} onChange={e=>setBody(e.target.value)} rows={8} placeholder="Write your message here..." style={{ width:"100%", padding:"10px 13px", borderRadius:10, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", resize:"vertical", boxSizing:"border-box", marginBottom:20 }}/>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
+            <div style={{ fontSize:13, color:C.muted }}>Sending to <b style={{ color:C.navy }}>{recipients.length} contractor{recipients.length!==1?"s":""}</b></div>
+            <Btn onClick={send} disabled={loading} style={{ padding:"10px 24px" }}>{loading?"Sending...":"Send Email"}</Btn>
           </div>
-          <div style={{ background:C.off, borderRadius:10, padding:16, marginBottom:24, textAlign:"left" }}>
-            <div style={{ fontSize:12, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:8 }}>Recipients</div>
-            <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
-              {recipients.map(c=>(
-                <div key={c.username} style={{ display:"flex", alignItems:"center", gap:6, background:"#fff", border:`1px solid ${C.border}`, borderRadius:8, padding:"5px 10px" }}>
-                  <Avatar name={c.name} photoUrl={c.photoUrl} size={22}/>
-                  <span style={{ fontSize:12, fontWeight:600, color:C.navy }}>{c.name}</span>
-                  <span style={{ fontSize:11, color:C.muted }}>{c.email}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <Btn onClick={reset} style={{ padding:"10px 28px" }}>Send Another</Btn>
         </Card>
-      ) : (
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 300px", gap:20, alignItems:"start" }}>
-          <Card>
-            <div style={{ fontSize:15, fontWeight:700, marginBottom:16 }}>Compose Email</div>
-            {err&&<Alert type="error">{err}</Alert>}
-            <FieldLabel required>Subject</FieldLabel>
-            <FieldInput value={subject} onChange={e=>setSubject(e.target.value)} placeholder="e.g. Important Payroll Update" style={{ marginBottom:14 }}/>
-            <FieldLabel required>Message</FieldLabel>
-            <textarea value={body} onChange={e=>setBody(e.target.value)} rows={8} placeholder="Write your message here..." style={{ width:"100%", padding:"10px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", resize:"vertical", boxSizing:"border-box", marginBottom:20 }}/>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
-              <div style={{ fontSize:13, color:C.muted }}>
-                Sending to <b style={{ color:C.navy }}>{recipients.length} contractor{recipients.length!==1?"s":""}</b> from <b style={{ color:C.blue }}>hr@elitegrid.co</b>
-              </div>
-              <Btn onClick={send} disabled={loading} style={{ padding:"10px 24px" }}>{loading?"Sending...":"Send Email"}</Btn>
-            </div>
-          </Card>
 
-          <Card>
-            <div style={{ fontSize:15, fontWeight:700, marginBottom:16 }}>Recipients</div>
-            <div style={{ display:"flex", gap:8, marginBottom:16 }}>
-              {[["all","All Active"],["byClient","By Client"]].map(([val,label])=>(
-                <button key={val} onClick={()=>setTargetGroup(val)}
-                  style={{ flex:1, padding:"8px", borderRadius:8, border:`1.5px solid ${targetGroup===val?C.blue:C.border}`, background:targetGroup===val?"#DBEAFE":"#fff", color:targetGroup===val?C.blue:C.muted, fontSize:12, fontWeight:targetGroup===val?700:500, cursor:"pointer", fontFamily:"inherit" }}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            {targetGroup==="byClient"&&(
-              <div style={{ marginBottom:16 }}>
-                <div style={{ fontSize:12, fontWeight:600, color:C.muted, marginBottom:8 }}>Select client accounts:</div>
-                <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
-                  {clientsInScope.map(cl=>(
-                    <button key={cl} onClick={()=>toggleClient(cl)}
-                      style={{ padding:"6px 12px", borderRadius:7, border:`1.5px solid ${selectedClients.includes(cl)?C.blue:C.border}`, background:selectedClients.includes(cl)?"#DBEAFE":"#fff", color:selectedClients.includes(cl)?C.blue:C.muted, fontSize:12, fontWeight:selectedClients.includes(cl)?700:500, cursor:"pointer", fontFamily:"inherit" }}>
-                      {cl} ({active.filter(c=>c.client===cl).length})
-                    </button>
-                  ))}
-                </div>
+        {/* Recipients */}
+        <Card>
+          <div style={{ fontSize:15, fontWeight:700, marginBottom:14 }}>Recipients</div>
+          {/* Target group tabs */}
+          <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap" }}>
+            {[["all","All Active"],["byClient","By Client"],["individual","Individual"]].map(([val,label])=>(
+              <button key={val} onClick={()=>{ setTargetGroup(val); setSelectedClients([]); setSelectedUsers([]); }}
+                style={{ padding:"6px 12px", borderRadius:20, border:`1.5px solid ${targetGroup===val?C.blue:C.border}`, background:targetGroup===val?"#DBEAFE":"#fff", color:targetGroup===val?C.blue:C.muted, fontSize:12, fontWeight:targetGroup===val?700:500, cursor:"pointer", fontFamily:"inherit" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* By client selection */}
+          {targetGroup==="byClient" && (
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:12, fontWeight:600, color:C.muted, marginBottom:8 }}>Select clients:</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                {clientsInScope.map(cl=>(
+                  <button key={cl} onClick={()=>toggleClient(cl)}
+                    style={{ padding:"5px 12px", borderRadius:20, border:`1.5px solid ${selectedClients.includes(cl)?C.blue:C.border}`, background:selectedClients.includes(cl)?"#DBEAFE":"#fff", color:selectedClients.includes(cl)?C.blue:C.muted, fontSize:12, fontWeight:selectedClients.includes(cl)?700:500, cursor:"pointer", fontFamily:"inherit" }}>
+                    {cl}
+                  </button>
+                ))}
               </div>
-            )}
-            <div style={{ fontSize:13, fontWeight:700, color:C.navy, marginBottom:10 }}>Preview ({recipients.length})</div>
-            <div style={{ maxHeight:280, overflowY:"auto" }}>
-              {recipients.length===0
-                ? <div style={{ fontSize:13, color:C.muted, padding:"8px 0" }}>No recipients. Select a client group above.</div>
-                : recipients.map(c=>(
-                  <div key={c.username} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
-                    <Avatar name={c.name} photoUrl={c.photoUrl} size={30}/>
-                    <div>
-                      <div style={{ fontSize:13, fontWeight:600, color:C.navy }}>{c.name}</div>
-                      <div style={{ fontSize:11, color:C.muted }}>{c.email}</div>
+            </div>
+          )}
+
+          {/* Individual selection with search */}
+          {targetGroup==="individual" && (
+            <div style={{ marginBottom:14 }}>
+              <div style={{ display:"flex", gap:8, marginBottom:8, alignItems:"center" }}>
+                <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, username, client..."
+                  style={{ flex:1, padding:"7px 12px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:12, fontFamily:"inherit", outline:"none" }}/>
+                <button onClick={selectAll} style={{ padding:"6px 10px", borderRadius:8, border:`1px solid ${C.blue}`, background:"#DBEAFE", color:C.blue, fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>All</button>
+                <button onClick={clearAll} style={{ padding:"6px 10px", borderRadius:8, border:`1px solid ${C.border}`, background:"#fff", color:C.muted, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>Clear</button>
+              </div>
+              <div style={{ maxHeight:220, overflowY:"auto", border:`1px solid ${C.border}`, borderRadius:8 }}>
+                {filteredForList.map(c=>(
+                  <div key={c.username} onClick={()=>toggleUser(c.username)}
+                    style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", cursor:"pointer", background:selectedUsers.includes(c.username)?"#EFF6FF":"transparent", borderBottom:`1px solid ${C.border}` }}>
+                    <input type="checkbox" checked={selectedUsers.includes(c.username)} onChange={()=>{}} style={{ cursor:"pointer", accentColor:C.blue }}/>
+                    <Avatar name={c.name} photoUrl={c.photoUrl} size={26}/>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:12, fontWeight:600, color:C.navy }}>{c.name}</div>
+                      <div style={{ fontSize:10, color:C.muted }}>@{c.username} · {c.client}</div>
                     </div>
                   </div>
-                ))
-              }
+                ))}
+              </div>
             </div>
-          </Card>
-        </div>
-      )}
+          )}
+
+          {/* Preview count */}
+          <div style={{ fontSize:13, fontWeight:700, color:C.navy, marginBottom:8 }}>
+            {targetGroup==="all"?"Sending to all "+active.length+" active contractors":
+             targetGroup==="byClient"?recipients.length+" contractors from selected clients":
+             selectedUsers.length+" contractors selected"}
+          </div>
+          {targetGroup!=="individual" && recipients.length>0 && (
+            <div style={{ maxHeight:180, overflowY:"auto" }}>
+              {recipients.map(c=>(
+                <div key={c.username} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
+                  <Avatar name={c.name} photoUrl={c.photoUrl} size={26}/>
+                  <div>
+                    <div style={{ fontSize:12, fontWeight:600, color:C.navy }}>{c.name}</div>
+                    <div style={{ fontSize:10, color:C.muted }}>{c.email}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }
+
 
 function AClients({ user, contractors, clients, setClients }) {
   const [selected,   setSelected]   = useState(null);
@@ -2438,7 +2553,7 @@ function AAuditLog({ auditLog }) {
   );
 }
 
-function ARolesAccess({ user, contractors, setContractors, perms, setPerms }) {
+function ARolesAccess({ user, contractors, setContractors, perms, setPerms, updatePerms }) {
   const [editPerm,setEditPerm]       = useState(null);
   const [tempClients,setTempClients] = useState([]);
   const admins = contractors.filter(c=>c.status==="Active"); // Super Admin sees all
@@ -2494,7 +2609,7 @@ function ARolesAccess({ user, contractors, setContractors, perms, setPerms }) {
         ))}
       </Card>
       {editPerm&&(
-        <div style={{ position:"fixed", inset:0, background:"rgba(27,42,74,0.65)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:200, padding:16 }} onClick={e=>e.target===e.currentTarget&&setEditPerm(null)}>
+        <div style={{ position:"fixed", inset:0, background:"rgba(27,42,74,0.65)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:700, padding:16 }} onClick={e=>e.target===e.currentTarget&&setEditPerm(null)}>
           <div style={{ background:"#fff", borderRadius:16, padding:32, width:"100%", maxWidth:440, boxShadow:"0 24px 80px rgba(0,0,0,0.3)" }}>
             <div style={{ fontSize:17, fontWeight:800, color:C.navy, marginBottom:4 }}>Set Client Access</div>
             <div style={{ fontSize:13, color:C.muted, marginBottom:20 }}>{editPerm.name} can see contractors from selected clients.</div>
@@ -2632,7 +2747,7 @@ function App() {
   }, []);
 
   const addNotification = React.useCallback((title, body) => {
-    const time = new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
+    const time = nowPHT().toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit",timeZone:"Asia/Manila"});
     setNotifications(prev=>[{title,body,time,read:false},...prev].slice(0,20));
   }, []);
 
@@ -2750,18 +2865,20 @@ function App() {
     "a-clients":   <AClients        user={currentUser} contractors={contractors} clients={clients} setClients={setClients}/>,
     "a-email":     <AEmailBlast     user={currentUser} contractors={contractors} perms={perms}/>,
     "a-audit":     <AAuditLog       auditLog={auditLog}/>,
-    "a-roles":     <ARolesAccess    user={currentUser} contractors={contractors} setContractors={setContractors} perms={perms} setPerms={setPerms}/>,
+    "a-roles":     <ARolesAccess    user={currentUser} contractors={contractors} setContractors={setContractors} perms={perms} setPerms={setPerms} updatePerms={updatePerms}/>,
     "a-payslips":  <APayslips       user={currentUser} contractors={contractors} payslips={payslips} setPayslips={setPayslips} perms={perms}/>,
     "a-calendar":  <ALeaveCalendar  user={currentUser} contractors={contractors} leaves={leaves} perms={perms}/>,
   };
 
   return (
-    <div style={{ minHeight:"100vh", background:C.off, fontFamily:"'Inter',sans-serif", color:C.navy }}>
+    <div style={{ minHeight:"100vh", background:C.bg, fontFamily:"'Inter',sans-serif", color:C.text, display:"flex" }}>
       {isContractor
         ? <ContractorNav page={page} setPage={setPage} user={currentUser} onLogout={logout} onChPw={()=>setChPwOpen(true)} notifications={notifications} onClearNotifs={clearNotifs} onMarkRead={markRead}/>
         : <AdminNav      page={page} setPage={setPage} user={currentUser} onLogout={logout} notifications={notifications} onClearNotifs={clearNotifs} onMarkRead={markRead}/>
       }
-      {isContractor?(contractorPages[page]||contractorPages["c-dashboard"]):(adminPages[page]||adminPages["a-overview"])}
+      <div style={{ marginLeft:240, flex:1, minHeight:"100vh", overflowY:"auto" }}>
+        {isContractor?(contractorPages[page]||contractorPages["c-dashboard"]):(adminPages[page]||adminPages["a-overview"])}
+      </div>
       {chPwOpen&&<ChangePwModal user={currentUser} onClose={()=>setChPwOpen(false)}/>}
       {showTimeoutWarning && (
         <div style={{ position:"fixed", inset:0, background:"rgba(27,42,74,0.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:500, padding:16 }}>
