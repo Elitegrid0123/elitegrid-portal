@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
 <title>Elite Grid | Team Portal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -30,7 +33,7 @@ const { useState, useRef } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwBtJQmfnCT8jRLWR1goBkDZxgFpqKC0qHupJlBJj9RoYpolRvIILBeh8b1ak2gX5DT/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby_UuPT6e6iBsw7zQs20ImYa52bRpFC_8AoyhdmHGQk7Ig6jyzPkkt0mWFJ77rHX4sE/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -524,6 +527,7 @@ function ContractorNav({ page, setPage, user, onLogout, onChPw, notifications, o
     { id:"c-payslips",      label:"Payslips",      icon:"₱" },
     { id:"c-pto",           label:"PTO Balances",  icon:"◷" },
     { id:"c-leave",         label:"My Leave",      icon:"✦" },
+    { id:"c-calendar",      label:"Team Calendar", icon:"◫" },
     { id:"c-announcements", label:"Announcements", icon:"◈" },
   ];
   return (
@@ -591,6 +595,10 @@ function AdminNav({ page, setPage, user, onLogout, notifications, onClearNotifs,
     { id:"comms",      label:"Comms",       icon:"◈", items:[
       { id:"a-announce", label:"Announcements" },
       { id:"a-email",    label:"Email Blast" },
+    ]},
+    { id:"hr",         label:"HR",          icon:"♡", items:[
+      { id:"a-hr-calendar", label:"HR Calendar" },
+      { id:"a-payroll",     label:"Payroll Summary" },
     ]},
   ];
 
@@ -705,7 +713,8 @@ function CDashboard({ user, contractor, leaves, setPage }) {
   const c = contractor;
   const vlBal = Math.max(0,parseFloat((c.vlAccrued-c.vlUsed-c.vlPending).toFixed(2)));
   const slBal = Math.max(0,parseFloat((c.slTotal-c.slUsed-c.slPending).toFixed(2)));
-  const myPayslips = (user._payslips||[]).filter(p=>p.username===user.username);
+  const _myUn = (user.username||user._username||"").toLowerCase();
+  const myPayslips = (user._payslips||[]).filter(p=>!p.username||p.username.toLowerCase()===_myUn);
   const latest = myPayslips[0];
   const pendingLeaves = leaves.filter(l=>l.username===user.username&&l.status==="Pending").length;
   const hasPhoto = !!c.photoUrl;
@@ -727,9 +736,15 @@ function CDashboard({ user, contractor, leaves, setPage }) {
           <button onClick={()=>setPage("c-profile")} style={{ background:"#92400E", color:"#fff", border:"none", borderRadius:7, padding:"6px 14px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>Add Photo</button>
         </div>
       )}
-      <div style={{ marginBottom:22 }}>
-        <div style={{ fontSize:22, fontWeight:800, marginBottom:4 }}>Welcome back, {user.name.split(" ")[0]}</div>
-        <div style={{ fontSize:14, color:C.muted }}>{c.position} - {c.client} - {c.tier}</div>
+      <div style={{ marginBottom:22, display:"flex", alignItems:"flex-start", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
+        <div>
+          <div style={{ fontSize:22, fontWeight:800, marginBottom:4 }}>Welcome back, {user.name.split(" ")[0]}</div>
+          <div style={{ fontSize:14, color:C.muted }}>{c.position} — {c.client} — {c.tier}</div>
+        </div>
+        <a href="https://clockify.me" target="_blank" rel="noopener noreferrer"
+          style={{ display:"inline-flex", alignItems:"center", gap:8, background:C.navy, color:"#fff", borderRadius:24, padding:"9px 18px", fontSize:13, fontWeight:700, textDecoration:"none", boxShadow:"0 2px 8px rgba(27,42,74,0.25)" }}>
+          <span style={{ fontSize:16 }}>⏱</span> Log Time in Clockify
+        </a>
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:14, marginBottom:22 }}>
         {stats.map(s => (
@@ -902,6 +917,7 @@ function ContractorDocs({ contractor, user, canManage }) {
 function CProfile({ contractor, setContractors }) {
   const c = contractor;
   const [photoModal, setPhotoModal] = useState(false);
+  const [chPw,       setChPw]       = useState(false);
   const initials = c.name.split(" ").map(n=>n[0]).join("").slice(0,2);
   const fields = [["Full Name",c.name],["Position",c.position],["Immediate Supervisor",c.supervisor||"Not set"],["Client Account",c.client],["Service Tier",c.tier],["Rate",c.rate],["Start Date",c.startDate],["Email",c.email],["Status",c.status]];
 
@@ -926,6 +942,9 @@ function CProfile({ contractor, setContractors }) {
             <button onClick={()=>setPhotoModal(true)} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:7, padding:"6px 14px", fontSize:12, color:C.blue, fontWeight:600, cursor:"pointer" }}>
               {c.photoUrl ? "Change Photo" : "Add Photo"}
             </button>
+            <button onClick={()=>setChPw(true)} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:7, padding:"6px 14px", fontSize:12, color:C.muted, fontWeight:600, cursor:"pointer" }}>
+              Change Password
+            </button>
             {!c.photoUrl && <span style={{ fontSize:11, color:C.amber, marginLeft:10, fontWeight:600 }}>Photo missing</span>}
           </div>
         </div>
@@ -939,6 +958,7 @@ function CProfile({ contractor, setContractors }) {
         </div>
       </Card>
       {photoModal && <PhotoUpload currentUrl={c.photoUrl} onSave={savePhoto} onClose={()=>setPhotoModal(false)}/>}
+      {chPw && <ChangePwModal user={contractor} onClose={()=>setChPw(false)}/>}
       <ContractorDocs contractor={c} user={{name:"",_username:c.username}} canManage={false}/>
     </div>
   );
@@ -1228,7 +1248,7 @@ function CLeave({ user, contractor, leaves, setLeaves, setContractors, onContrac
           : <div style={{ overflowX:"auto" }}>
               <table style={{ width:"100%", borderCollapse:"collapse" }}>
                 <thead><tr style={{ background:C.off }}>
-                  {["Type","Dates","Days","Hours","Filed","Approval","Status"].map(h => (
+                  {["Type","Dates","Days","Hours","Filed","Approval","Status",""].map(h => (
                     <th key={h} style={{ padding:"9px 14px", textAlign:"left", fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.5px", borderBottom:`1px solid ${C.border}` }}>{h}</th>
                   ))}
                 </tr></thead>
@@ -1248,12 +1268,134 @@ function CLeave({ user, contractor, leaves, setLeaves, setContractors, onContrac
                           : <span style={{fontSize:11,color:C.muted}}>—</span>}
                       </td>
                       <td style={{ padding:"11px 14px" }}><SBadge s={l.status}/></td>
+                      <td style={{ padding:"11px 14px" }}>
+                        {l.status==="Pending" && (
+                          <button onClick={()=>{
+                            if (!window.confirm("Cancel this leave request?")) return;
+                            const hrs = parseFloat(l.hours)||0;
+                            setLeaves(prev=>prev.filter(x=>x.leaveId!==l.leaveId));
+                            setContractors(prev=>prev.map(ct=>{
+                              if (ct.username!==user.username&&ct.username!==user._username) return ct;
+                              if (l.leaveType==="VL") return {...ct, vlPending:Math.max(0,parseFloat((ct.vlPending-hrs).toFixed(2)))};
+                              return {...ct, slPending:Math.max(0,parseFloat((ct.slPending-hrs).toFixed(2)))};
+                            }));
+                            if (!DEMO_MODE) callScript("cancelLeave",{leaveId:l.leaveId},()=>{},()=>{});
+                          }}
+                          style={{ background:C.redBg, border:"1px solid #FECACA", borderRadius:6, padding:"4px 10px", fontSize:11, color:C.red, fontWeight:600, cursor:"pointer" }}>
+                            Cancel
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
         }
+      </Card>
+    </div>
+  );
+}
+
+
+// ── CONTRACTOR LEAVE CALENDAR ────────────────────────────────────────
+function CLeaveCalendar({ contractor, leaves, contractors }) {
+  const today   = new Date();
+  const [year,  setYear]  = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth());
+
+  // Only show teammates on the same client
+  const myClient   = contractor ? contractor.client : "";
+  const teammates  = contractors.filter(c => c.client === myClient && c.status === "Active");
+  const teammateUns= new Set(teammates.map(c => c.username.toLowerCase()));
+
+  // Approved leaves for the contractor AND all teammates on same client
+  const myUn = contractor ? contractor.username.toLowerCase() : "";
+  const teamLeaves = leaves.filter(l =>
+    l.status === "Approved" && (
+      (l.username||"").toLowerCase() === myUn ||
+      teammateUns.has((l.username||"").toLowerCase())
+    )
+  );
+
+  const CLIENT_COLORS = ["#2E86C1","#5BC8E8","#16A34A","#D97706","#7C3AED","#DC2626","#0E7490"];
+  const colorMap = {};
+  teammates.forEach((c,i) => colorMap[c.username.toLowerCase()] = CLIENT_COLORS[i % CLIENT_COLORS.length]);
+
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const firstDay    = new Date(year, month, 1).getDay();
+  const monthName   = new Date(year, month, 1).toLocaleString("en-US",{month:"long",year:"numeric"});
+
+  const pad = (n) => String(n).padStart(2,"0");
+  const getLeavesForDay = (day) => {
+    const dStr = `${year}-${pad(month+1)}-${pad(day)}`;
+    return teamLeaves.filter(l => {
+      const s = String(l.start).substring(0,10);
+      const e = String(l.end||l.start).substring(0,10);
+      return dStr >= s && dStr <= e;
+    });
+  };
+
+  const prevMonth = () => { if(month===0){setMonth(11);setYear(y=>y-1);}else setMonth(m=>m-1); };
+  const nextMonth = () => { if(month===11){setMonth(0);setYear(y=>y+1);}else setMonth(m=>m+1); };
+
+  const cells = [];
+  for(let i=0;i<firstDay;i++) cells.push(null);
+  for(let d=1;d<=daysInMonth;d++) cells.push(d);
+  while(cells.length%7!==0) cells.push(null);
+
+  const isToday = (d) => d && year===today.getFullYear() && month===today.getMonth() && d===today.getDate();
+
+  return (
+    <div style={{ padding:"28px 20px", maxWidth:900, margin:"0 auto" }}>
+      <div style={{ fontSize:20, fontWeight:800, marginBottom:6 }}>Team Leave Calendar</div>
+      <div style={{ fontSize:14, color:C.muted, marginBottom:16 }}>{myClient} team · Approved leaves only</div>
+
+      {/* Legend */}
+      <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:16 }}>
+        {teammates.map(c=>(
+          <div key={c.username} style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <div style={{ width:10, height:10, borderRadius:3, background:colorMap[c.username.toLowerCase()]||C.blue }}/>
+            <span style={{ fontSize:12, color:C.muted, fontWeight:600 }}>{c.name.split(" ")[0]}</span>
+          </div>
+        ))}
+      </div>
+
+      <Card>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+          <button onClick={prevMonth} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", fontSize:16, fontFamily:"inherit" }}>‹</button>
+          <div style={{ fontSize:16, fontWeight:800, color:C.navy }}>{monthName}</div>
+          <button onClick={nextMonth} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", fontSize:16, fontFamily:"inherit" }}>›</button>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:4 }}>
+          {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>(
+            <div key={d} style={{ textAlign:"center", fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", padding:"4px 0" }}>{d}</div>
+          ))}
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
+          {cells.map((d,i)=>{
+            const dayLeaves = d ? getLeavesForDay(d) : [];
+            return (
+              <div key={i} style={{ minHeight:72, borderRadius:8, padding:"4px 6px", background:isToday(d)?"#EFF6FF":d?"#fff":"transparent", border:isToday(d)?`2px solid ${C.blue}`:`1px solid ${C.border}` }}>
+                {d && (
+                  <>
+                    <div style={{ fontSize:12, fontWeight:isToday(d)?800:500, color:isToday(d)?C.blue:C.navy, marginBottom:3 }}>{d}</div>
+                    {dayLeaves.slice(0,3).map((l,j)=>{
+                      const bg  = colorMap[(l.username||"").toLowerCase()]||C.blue;
+                      const ct  = teammates.find(c=>c.username.toLowerCase()===(l.username||"").toLowerCase());
+                      return (
+                        <div key={j} title={ct?ct.name:l.username} style={{ background:bg, color:"#fff", fontSize:9, fontWeight:700, padding:"2px 5px", borderRadius:4, marginBottom:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                          {ct?ct.name.split(" ")[0]:l.username} {l.leaveType}
+                        </div>
+                      );
+                    })}
+                    {dayLeaves.length>3 && <div style={{ fontSize:9, color:C.muted, fontWeight:600 }}>+{dayLeaves.length-3} more</div>}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </Card>
     </div>
   );
@@ -1346,6 +1488,50 @@ function AOverview({ user, contractors, leaves, perms, setPage, announcements })
         }
       </Card>
 
+      {/* Upcoming Birthdays & Anniversaries */}
+      {(()=>{
+        const today = nowPHT();
+        const events = contractors.filter(c=>c.status==="Active").flatMap(c=>{
+          const evs = [];
+          if (c.dob) {
+            const dob = new Date(c.dob);
+            if (!isNaN(dob.getTime())) {
+              const thisY = new Date(today.getFullYear(), dob.getMonth(), dob.getDate());
+              const next  = thisY >= today ? thisY : new Date(today.getFullYear()+1, dob.getMonth(), dob.getDate());
+              const diff  = Math.ceil((next-today)/86400000);
+              if (diff<=14) evs.push({type:"birthday", name:c.name, diff, label:diff===0?"Today":diff===1?"Tomorrow":"In "+diff+" days", color:"#EC4899"});
+            }
+          }
+          if (c.startDate) {
+            const s = new Date(c.startDate);
+            if (!isNaN(s.getTime())) {
+              const thisY = new Date(today.getFullYear(), s.getMonth(), s.getDate());
+              const next  = thisY >= today ? thisY : new Date(today.getFullYear()+1, s.getMonth(), s.getDate());
+              const diff  = Math.ceil((next-today)/86400000);
+              const yrs   = today.getFullYear()-s.getFullYear()+(next.getFullYear()>today.getFullYear()?1:0);
+              if (diff<=14) evs.push({type:"anniversary", name:c.name, diff, label:`${yrs}yr${yrs!==1?"s":""} · `+(diff===0?"Today":diff===1?"Tomorrow":"In "+diff+" days"), color:C.blue});
+            }
+          }
+          return evs;
+        }).sort((a,b)=>a.diff-b.diff).slice(0,5);
+        if (events.length===0) return null;
+        return (
+          <Card style={{ marginTop:14 }}>
+            <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Upcoming This Week</div>
+            {events.map((e,i)=>(
+              <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderBottom:i<events.length-1?`1px solid ${C.border}`:"none" }}>
+                <span style={{ fontSize:20 }}>{e.type==="birthday"?"🎂":"🏆"}</span>
+                <div style={{ flex:1 }}>
+                  <span style={{ fontWeight:600, fontSize:13, color:C.navy }}>{e.name}</span>
+                  <span style={{ fontSize:12, color:C.muted, marginLeft:8 }}>{e.type==="birthday"?"Birthday":"Work Anniversary"}</span>
+                </div>
+                <span style={{ fontSize:12, fontWeight:700, color:e.color }}>{e.label}</span>
+              </div>
+            ))}
+          </Card>
+        );
+      })()}
+
       {/* Announcements on Overview */}
       <Card style={{ marginTop:14 }}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
@@ -1369,7 +1555,7 @@ function AOverview({ user, contractors, leaves, perms, setPage, announcements })
   );
 }
 
-function ATeam({ user, contractors, setContractors, perms }) {
+function ATeam({ user, contractors, setContractors, perms, rateHistory, setRateHistory }) {
   const [showAdd,    setShowAdd]    = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [search,     setSearch]     = useState("");
@@ -1460,28 +1646,44 @@ function ATeam({ user, contractors, setContractors, perms }) {
         if (!DEMO_MODE) callScript("addContractor", {...c, vlTotal:c.vlTotal||160, vlAccrued:c.vlAccrued||0, vlMonthlyRate:c.vlMonthlyRate||13.33, slTotal:c.slTotal||40}, ()=>{}, ()=>{});
         setContractors(p=>[...p,c]); setShowAdd(false);
       }} mode="add"/>}
-      {editTarget && <ContractorModal user={user} onClose={()=>setEditTarget(null)}  onSave={c=>{
+      {editTarget && <ContractorModal user={user} onClose={()=>setEditTarget(null)}  onSave={(c, rateNote) => {
         if (!DEMO_MODE) callScript("updateContractor", c, ()=>{}, ()=>{});
+        // Log rate change if rate was changed
+        if (rateNote && editTarget.rate !== c.rate) {
+          const entry = {
+            id: "RC-"+Date.now(), contractorName: c.name, username: c.username,
+            oldRate: editTarget.rate, newRate: c.rate, reason: rateNote,
+            changedBy: user.name, timestamp: formatPHTTime(nowPHT(),{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"})
+          };
+          if (setRateHistory) setRateHistory(prev=>[entry,...prev]);
+        }
         setContractors(p=>p.map(x=>x.username===c.username?c:x)); setEditTarget(null);
-      }} mode="edit" existing={editTarget}/>}
+      }} mode="edit" existing={editTarget} rateHistory={rateHistory}/>}
     </div>
   );
 }
 
-function ContractorModal({ user, onClose, onSave, mode, existing }) {
+function ContractorModal({ user, onClose, onSave, mode, existing, rateHistory }) {
   const isSA = user.role==="superadmin";
   const [form, setForm] = useState(existing||{
     username:"", password:"eg2026", name:"", position:"", client:"MCO",
-    tier:"ANCHOR", rate:"", startDate:"", email:"", supervisor:"", status:"Active", role:"contractor",
+    tier:"ANCHOR", rate:"", startDate:"", email:"", supervisor:"", dob:"", status:"Active", role:"contractor",
     photoUrl:"", vlTotal:160, vlAccrued:0, vlUsed:0, vlPending:0, vlMonthlyRate:13.33,
     slTotal:40, slUsed:0, slPending:0,
   });
-  const [err, setErr] = useState("");
+  const [err,       setErr]       = useState("");
+  const [rateNote,  setRateNote]  = useState("");
+  const [showRatePrompt, setShowRatePrompt] = useState(false);
+  const originalRate = existing ? existing.rate : null;
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
 
   const save = () => {
     if (!form.name||!form.username||!form.position||!form.client||!form.startDate) { setErr("Please fill in all required fields."); return; }
-    onSave(form);
+    // If rate changed in edit mode, require a reason
+    if (mode==="edit" && originalRate && form.rate !== originalRate && !showRatePrompt) {
+      setShowRatePrompt(true); return;
+    }
+    onSave(form, rateNote);
   };
 
   return (
@@ -1491,7 +1693,7 @@ function ContractorModal({ user, onClose, onSave, mode, existing }) {
         <div style={{ fontSize:13, color:C.muted, marginBottom:20 }}>{mode==="add"?"Fill in all profile and PTO details.":"You can edit "+(isSA?"all fields.":"basic info and status only.")}</div>
         {err && <Alert type="error">{err}</Alert>}
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))", gap:14, marginBottom:14 }}>
-          {[["Full Name","name","text",true],["Username","username","text",true],["Email","email","email",false],["Position","position","text",true],["Immediate Supervisor","supervisor","text",false],["Start Date","startDate","date",true]].map(([label,key,type,req])=>(
+          {[["Full Name","name","text",true],["Username","username","text",true],["Email","email","email",false],["Position","position","text",true],["Immediate Supervisor","supervisor","text",false],["Date of Birth","dob","date",false],["Start Date","startDate","date",true]].map(([label,key,type,req])=>(
             <div key={key}>
               <FieldLabel required={req}>{label}</FieldLabel>
               <FieldInput type={type} value={form[key]||""} onChange={e=>set(key,e.target.value)}/>
@@ -1546,17 +1748,36 @@ function ContractorModal({ user, onClose, onSave, mode, existing }) {
 
 // ── ADMIN PAYSLIPS PAGE ──────────────────────────────────────────────
 function APayslips({ user, contractors, payslips, setPayslips, perms }) {
-  const [showForm, setShowForm] = useState(false);
-  const [search,   setSearch]   = useState("");
-  const [form,     setForm]     = useState({ username:"", period:"", gross:"", deductions:"", adjustments:"", net:"", status:"Paid", released:"" });
-  const [err,      setErr]      = useState("");
-  const [ok,       setOk]       = useState("");
-  const [loading,  setLoading]  = useState(false);
+  const [showForm,    setShowForm]    = useState(false);
+  const [searchName,  setSearchName]  = useState("");
+  const [filterClient,setFilterClient]= useState("All");
+  const [filterPeriod,setFilterPeriod]= useState("");
+  const [form,        setForm]        = useState({ username:"", period:"", gross:"", allowance:"", deductions:"", adjustments:"", net:"", status:"Paid", released:"" });
+  const [err,         setErr]         = useState("");
+  const [ok,          setOk]          = useState("");
+  const [loading,     setLoading]     = useState(false);
 
-  const visible = getVisible(user, contractors, perms).filter(c=>c.status==="Active");
-  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  const visible   = getVisible(user, contractors, perms);
+  const visUnames = new Set(visible.map(c=>c.username.toLowerCase()));
+  const set       = (k,v) => setForm(f=>({...f,[k]:v}));
 
-  // Auto-calc net pay
+  const clientsInScope = ["All", ...new Set(visible.map(c=>c.client))];
+
+  // Filter payslips to only those in scope + apply search filters
+  const filtered = payslips.filter(p => {
+    if (!p.username) return false;
+    const un = p.username.toLowerCase();
+    if (!visUnames.has(un)) return false;
+    if (searchName && !p.username.toLowerCase().includes(searchName.toLowerCase()) &&
+        !(p.name||"").toLowerCase().includes(searchName.toLowerCase())) return false;
+    if (filterClient !== "All") {
+      const c = visible.find(ct=>ct.username.toLowerCase()===un);
+      if (!c || c.client !== filterClient) return false;
+    }
+    if (filterPeriod && !(p.period||"").toLowerCase().includes(filterPeriod.toLowerCase())) return false;
+    return true;
+  });
+
   const calcNet = (f) => {
     const g  = parseFloat(String(f.gross||"").replace(/[^0-9.]/g,""))||0;
     const al = parseFloat(String(f.allowance||"").replace(/[^0-9.]/g,""))||0;
@@ -1565,27 +1786,23 @@ function APayslips({ user, contractors, payslips, setPayslips, perms }) {
     return g + al - d + aj;
   };
 
-  const filtered = payslips.filter(p=>
-    p.username.toLowerCase().includes(search.toLowerCase()) ||
-    (p.name||"").toLowerCase().includes(search.toLowerCase())
-  );
-
   const save = () => {
     setErr("");
     if (!form.username||!form.period||!form.gross) { setErr("Contractor, period, and gross pay are required."); return; }
     setLoading(true);
     const net = "$"+calcNet(form).toFixed(2);
-    const entry = { ...form, net, name: (contractors.find(c=>c.username===form.username)||{}).name||form.username };
+    const cInfo = contractors.find(c=>c.username===form.username)||{};
+    const entry = { ...form, net, name: cInfo.name||form.username };
     if (!DEMO_MODE) {
       callScript("addPayslip", {...form, net}, ()=>{
         setPayslips(p=>[entry,...p]);
-        setForm({ username:"", period:"", gross:"", deductions:"", adjustments:"", net:"", status:"Paid", released:"" });
+        setForm({ username:"", period:"", gross:"", allowance:"", deductions:"", adjustments:"", net:"", status:"Paid", released:"" });
         setOk("Payslip saved successfully."); setLoading(false);
         setTimeout(()=>setOk(""),3000);
       }, ()=>{ setErr("Failed to save. Try again."); setLoading(false); });
     } else {
       setPayslips(p=>[entry,...p]);
-      setForm({ username:"", period:"", gross:"", deductions:"", adjustments:"", net:"", status:"Paid", released:"" });
+      setForm({ username:"", period:"", gross:"", allowance:"", deductions:"", adjustments:"", net:"", status:"Paid", released:"" });
       setOk("Payslip saved. (Demo)"); setLoading(false);
       setTimeout(()=>setOk(""),3000);
     }
@@ -1594,7 +1811,7 @@ function APayslips({ user, contractors, payslips, setPayslips, perms }) {
   const netPreview = form.gross ? calcNet(form) : null;
 
   return (
-    <div style={{ padding:"28px 20px", maxWidth:960, margin:"0 auto" }}>
+    <div style={{ padding:"28px 20px", maxWidth:1060, margin:"0 auto" }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20, flexWrap:"wrap", gap:10 }}>
         <div style={{ fontSize:20, fontWeight:800 }}>Payslips</div>
         <Btn onClick={()=>setShowForm(!showForm)}>+ Add Payslip</Btn>
@@ -1609,43 +1826,25 @@ function APayslips({ user, contractors, payslips, setPayslips, perms }) {
             <div>
               <FieldLabel required>Contractor</FieldLabel>
               <select value={form.username} onChange={e=>set("username",e.target.value)}
-                style={{ width:"100%", padding:"10px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", background:"#fff" }}>
+                style={{ width:"100%", padding:"10px 13px", borderRadius:10, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", background:"#fff" }}>
                 <option value="">Select contractor...</option>
-                {visible.map(c=><option key={c.username} value={c.username}>{c.name} (@{c.username})</option>)}
+                {visible.filter(c=>c.status==="Active").map(c=><option key={c.username} value={c.username}>{c.name} (@{c.username})</option>)}
               </select>
             </div>
-            <div>
-              <FieldLabel required>Pay Period</FieldLabel>
-              <FieldInput value={form.period} onChange={e=>set("period",e.target.value)} placeholder="e.g. May 16-31, 2025"/>
-            </div>
-            <div>
-              <FieldLabel required>Gross Pay</FieldLabel>
-              <FieldInput value={form.gross} onChange={e=>set("gross",e.target.value)} placeholder="e.g. $560.00"/>
-            </div>
-            <div>
-              <FieldLabel>Allowance</FieldLabel>
-              <FieldInput value={form.allowance||""} onChange={e=>set("allowance",e.target.value)} placeholder="e.g. $10.00"/>
-            </div>
-            <div>
-              <FieldLabel>Deductions</FieldLabel>
-              <FieldInput value={form.deductions} onChange={e=>set("deductions",e.target.value)} placeholder="e.g. $28.00"/>
-            </div>
-            <div>
-              <FieldLabel>Adjustments</FieldLabel>
-              <FieldInput value={form.adjustments} onChange={e=>set("adjustments",e.target.value)} placeholder="e.g. $50.00 or -$20.00"/>
-            </div>
+            <div><FieldLabel required>Pay Period</FieldLabel><FieldInput value={form.period} onChange={e=>set("period",e.target.value)} placeholder="e.g. May 16-31, 2025"/></div>
+            <div><FieldLabel required>Gross Pay</FieldLabel><FieldInput value={form.gross} onChange={e=>set("gross",e.target.value)} placeholder="e.g. $560.00"/></div>
+            <div><FieldLabel>Allowance</FieldLabel><FieldInput value={form.allowance||""} onChange={e=>set("allowance",e.target.value)} placeholder="e.g. $10.00"/></div>
+            <div><FieldLabel>Deductions</FieldLabel><FieldInput value={form.deductions} onChange={e=>set("deductions",e.target.value)} placeholder="e.g. $28.00"/></div>
+            <div><FieldLabel>Adjustments</FieldLabel><FieldInput value={form.adjustments} onChange={e=>set("adjustments",e.target.value)} placeholder="e.g. $50.00 or -$20.00"/></div>
             <div>
               <FieldLabel>Status</FieldLabel>
               <select value={form.status} onChange={e=>set("status",e.target.value)}
-                style={{ width:"100%", padding:"10px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", background:"#fff" }}>
+                style={{ width:"100%", padding:"10px 13px", borderRadius:10, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", background:"#fff" }}>
                 <option value="Paid">Paid</option>
                 <option value="Pending">Pending</option>
               </select>
             </div>
-            <div>
-              <FieldLabel>Date Released</FieldLabel>
-              <FieldInput type="date" value={form.released} onChange={e=>set("released",e.target.value)}/>
-            </div>
+            <div><FieldLabel>Date Released</FieldLabel><FieldInput type="date" value={form.released} onChange={e=>set("released",e.target.value)}/></div>
           </div>
           {netPreview!==null && (
             <div style={{ padding:"10px 14px", background:C.off, borderRadius:8, fontSize:13, marginBottom:14 }}>
@@ -1659,38 +1858,58 @@ function APayslips({ user, contractors, payslips, setPayslips, perms }) {
         </Card>
       )}
 
-      <div style={{ marginBottom:14 }}>
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or username..."
-          style={{ padding:"8px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", width:260 }}/>
+      {/* Filters */}
+      <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap", alignItems:"center" }}>
+        <input value={searchName} onChange={e=>setSearchName(e.target.value)} placeholder="Search name or username..."
+          style={{ padding:"8px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", width:220 }}/>
+        <select value={filterClient} onChange={e=>setFilterClient(e.target.value)}
+          style={{ padding:"8px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", background:"#fff" }}>
+          {clientsInScope.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
+        <input value={filterPeriod} onChange={e=>setFilterPeriod(e.target.value)} placeholder="Filter by period..."
+          style={{ padding:"8px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", width:180 }}/>
+        {(searchName||filterClient!=="All"||filterPeriod) &&
+          <button onClick={()=>{ setSearchName(""); setFilterClient("All"); setFilterPeriod(""); }}
+            style={{ padding:"8px 12px", borderRadius:8, border:`1px solid ${C.border}`, background:"#fff", color:C.muted, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
+            Clear filters
+          </button>
+        }
+        <span style={{ fontSize:12, color:C.muted, marginLeft:"auto" }}>{filtered.length} payslip{filtered.length!==1?"s":""}</span>
       </div>
 
       <Card style={{ padding:0, overflow:"hidden" }}>
         <div style={{ overflowX:"auto" }}>
           <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead><tr style={{ background:C.off }}>
-              {["Contractor","Period","Gross Pay","Allowance","Deductions","Adjustments","Net Pay","Status","Released"].map(h=>(
+              {["Contractor","Client","Period","Gross Pay","Allowance","Deductions","Adjustments","Net Pay","Status","Released"].map(h=>(
                 <th key={h} style={{ padding:"10px 14px", textAlign:"left", fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.5px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>{h}</th>
               ))}
             </tr></thead>
             <tbody>
               {filtered.length===0
-                ? <tr><td colSpan={8} style={{ padding:32, textAlign:"center", color:C.muted, fontSize:14 }}>No payslips found.</td></tr>
-                : filtered.map((p,i)=>(
-                  <tr key={i} style={{ borderBottom:`1px solid ${C.border}` }}>
-                    <td style={{ padding:"11px 14px" }}>
-                      <div style={{ fontWeight:600, fontSize:13 }}>{p.name||p.username}</div>
-                      <div style={{ fontSize:11, color:C.muted }}>@{p.username}</div>
-                    </td>
-                    <td style={{ padding:"11px 14px", fontSize:13 }}>{p.period}</td>
-                    <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.gross)}</td>
-                    <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.allowance)}</td>
-                    <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.deductions)}</td>
-                    <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.adjustments)}</td>
-                    <td style={{ padding:"11px 14px", fontSize:13, fontWeight:700 }}>{fmtCur(p.net)}</td>
-                    <td style={{ padding:"11px 14px" }}><SBadge s={p.status}/></td>
-                    <td style={{ padding:"11px 14px", fontSize:12, color:C.muted }}>{p.released}</td>
-                  </tr>
-                ))
+                ? <tr><td colSpan={10} style={{ padding:32, textAlign:"center", color:C.muted, fontSize:14 }}>No payslips found.</td></tr>
+                : filtered.map((p,i)=>{
+                    const cInfo = visible.find(c=>c.username.toLowerCase()===(p.username||"").toLowerCase());
+                    return (
+                      <tr key={i} style={{ borderBottom:`1px solid ${C.border}` }}>
+                        <td style={{ padding:"11px 14px" }}>
+                          <div style={{ fontWeight:600, fontSize:13 }}>{p.name||cInfo&&cInfo.name||p.username}</div>
+                          <div style={{ fontSize:11, color:C.muted }}>@{p.username}</div>
+                        </td>
+                        <td style={{ padding:"11px 14px" }}>
+                          {cInfo && <span style={{ background:"#DBEAFE", color:"#1D4ED8", fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:20 }}>{cInfo.client}</span>}
+                        </td>
+                        <td style={{ padding:"11px 14px", fontSize:13 }}>{p.period}</td>
+                        <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.gross)}</td>
+                        <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.allowance)}</td>
+                        <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.deductions)}</td>
+                        <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.adjustments)}</td>
+                        <td style={{ padding:"11px 14px", fontSize:13, fontWeight:700 }}>{fmtCur(p.net)}</td>
+                        <td style={{ padding:"11px 14px" }}><SBadge s={p.status}/></td>
+                        <td style={{ padding:"11px 14px", fontSize:12, color:C.muted }}>{p.released}</td>
+                      </tr>
+                    );
+                  })
               }
             </tbody>
           </table>
@@ -1808,11 +2027,267 @@ function ALeaveCalendar({ leaves, contractors, perms, user }) {
   );
 }
 
+
+// ── HR CALENDAR (Birthdays + Anniversaries) ──────────────────────────
+function AHRCalendar({ contractors }) {
+  const today = nowPHT();
+  const todayStr = todayPHT();
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const [viewYear,  setViewYear]  = useState(today.getFullYear());
+
+  // Get upcoming events in next 60 days
+  const getUpcoming = (days) => {
+    const events = [];
+    contractors.filter(c=>c.status==="Active").forEach(c => {
+      // Birthday
+      if (c.dob) {
+        const dob = new Date(c.dob);
+        if (!isNaN(dob.getTime())) {
+          const thisYearBday = new Date(today.getFullYear(), dob.getMonth(), dob.getDate());
+          const nextYearBday = new Date(today.getFullYear()+1, dob.getMonth(), dob.getDate());
+          const bday = thisYearBday >= today ? thisYearBday : nextYearBday;
+          const diff = Math.ceil((bday - today) / 86400000);
+          if (diff <= days) {
+            const age = today.getFullYear() - dob.getFullYear() + (bday.getFullYear() > today.getFullYear() ? 1 : 0);
+            events.push({ type:"birthday", name:c.name, client:c.client, date:bday, diff, label:`🎂 Turning ${age}`, color:"#EC4899" });
+          }
+        }
+      }
+      // Work anniversary
+      if (c.startDate) {
+        const start = new Date(c.startDate);
+        if (!isNaN(start.getTime())) {
+          const thisYearAnni = new Date(today.getFullYear(), start.getMonth(), start.getDate());
+          const nextYearAnni = new Date(today.getFullYear()+1, start.getMonth(), start.getDate());
+          const anni = thisYearAnni >= today ? thisYearAnni : nextYearAnni;
+          const diff = Math.ceil((anni - today) / 86400000);
+          if (diff <= days) {
+            const years = today.getFullYear() - start.getFullYear() + (anni.getFullYear() > today.getFullYear() ? 1 : 0);
+            events.push({ type:"anniversary", name:c.name, client:c.client, date:anni, diff, label:`🏆 ${years} year${years!==1?"s":""}`, color:C.blue });
+          }
+        }
+      }
+    });
+    return events.sort((a,b)=>a.diff-b.diff);
+  };
+
+  const upcoming = getUpcoming(60);
+
+  // Calendar grid
+  const daysInMonth  = new Date(viewYear, viewMonth+1, 0).getDate();
+  const firstDay     = new Date(viewYear, viewMonth, 1).getDay();
+  const monthName    = new Date(viewYear, viewMonth, 1).toLocaleString("en-US",{month:"long",year:"numeric"});
+  const prevM = () => { if(viewMonth===0){setViewMonth(11);setViewYear(y=>y-1);}else setViewMonth(m=>m-1); };
+  const nextM = () => { if(viewMonth===11){setViewMonth(0);setViewYear(y=>y+1);}else setViewMonth(m=>m+1); };
+
+  const getEventsForDay = (day) => {
+    const d = new Date(viewYear, viewMonth, day);
+    return upcoming.filter(e => e.date.getDate()===d.getDate() && e.date.getMonth()===d.getMonth() && e.date.getFullYear()===d.getFullYear());
+  };
+
+  const cells = [];
+  for(let i=0;i<firstDay;i++) cells.push(null);
+  for(let d=1;d<=daysInMonth;d++) cells.push(d);
+  while(cells.length%7!==0) cells.push(null);
+
+  const isToday = (d) => d && viewYear===today.getFullYear() && viewMonth===today.getMonth() && d===today.getDate();
+
+  return (
+    <div style={{ padding:"28px 20px", maxWidth:1000, margin:"0 auto" }}>
+      <div style={{ fontSize:20, fontWeight:800, marginBottom:6 }}>HR Calendar</div>
+      <div style={{ fontSize:14, color:C.muted, marginBottom:20 }}>Birthdays and work anniversaries for your team.</div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 280px", gap:20, alignItems:"start" }}>
+        {/* Calendar */}
+        <Card>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+            <button onClick={prevM} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", fontSize:16 }}>‹</button>
+            <div style={{ fontSize:15, fontWeight:800, color:C.navy }}>{monthName}</div>
+            <button onClick={nextM} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", fontSize:16 }}>›</button>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:4 }}>
+            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>(
+              <div key={d} style={{ textAlign:"center", fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", padding:"4px 0" }}>{d}</div>
+            ))}
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
+            {cells.map((d,i)=>{
+              const evs = d ? getEventsForDay(d) : [];
+              return (
+                <div key={i} style={{ minHeight:68, borderRadius:8, padding:"4px 6px", background:isToday(d)?"#EFF6FF":d?"#fff":"transparent", border:isToday(d)?`2px solid ${C.blue}`:`1px solid ${C.border}` }}>
+                  {d && (
+                    <>
+                      <div style={{ fontSize:12, fontWeight:isToday(d)?800:500, color:isToday(d)?C.blue:C.navy, marginBottom:3 }}>{d}</div>
+                      {evs.map((e,j)=>(
+                        <div key={j} title={e.name+" · "+e.label} style={{ background:e.color+"22", color:e.color, fontSize:9, fontWeight:700, padding:"2px 5px", borderRadius:4, marginBottom:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                          {e.type==="birthday"?"🎂":"🏆"} {e.name.split(" ")[0]}
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        {/* Upcoming events panel */}
+        <div>
+          <Card style={{ marginBottom:14 }}>
+            <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Upcoming (60 days)</div>
+            {upcoming.length===0
+              ? <div style={{ fontSize:13, color:C.muted }}>No upcoming events.</div>
+              : upcoming.map((e,i)=>(
+                <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderBottom:i<upcoming.length-1?`1px solid ${C.border}`:"none" }}>
+                  <div style={{ width:36, height:36, borderRadius:10, background:e.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>
+                    {e.type==="birthday"?"🎂":"🏆"}
+                  </div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:C.navy, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{e.name}</div>
+                    <div style={{ fontSize:11, color:C.muted }}>{e.label} · {e.client}</div>
+                  </div>
+                  <div style={{ textAlign:"right", flexShrink:0 }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:e.color }}>{e.diff===0?"Today":e.diff===1?"Tomorrow":"In "+e.diff+" days"}</div>
+                    <div style={{ fontSize:10, color:C.muted }}>{e.date.toLocaleDateString("en-PH",{month:"short",day:"numeric"})}</div>
+                  </div>
+                </div>
+              ))
+            }
+          </Card>
+          <div style={{ fontSize:10, color:C.muted, padding:"0 4px" }}>
+            <div style={{ display:"flex", gap:8, marginBottom:4 }}><span>🎂</span> Birthday</div>
+            <div style={{ display:"flex", gap:8 }}><span>🏆</span> Work Anniversary</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ── PAYROLL SUMMARY PAGE ─────────────────────────────────────────────
+function APayrollSummary({ payslips, contractors, perms, user }) {
+  const [filterPeriod, setFilterPeriod] = useState("");
+
+  const visible   = getVisible(user, contractors, perms);
+  const visUnames = new Set(visible.map(c=>c.username.toLowerCase()));
+
+  const scoped = payslips.filter(p => {
+    if (!p.username) return false;
+    if (!visUnames.has(p.username.toLowerCase())) return false;
+    if (filterPeriod && !(p.period||"").toLowerCase().includes(filterPeriod.toLowerCase())) return false;
+    return true;
+  });
+
+  // Get unique periods
+  const allPeriods = [...new Set(payslips.filter(p=>visUnames.has((p.username||"").toLowerCase())).map(p=>p.period).filter(Boolean))];
+
+  // Summary totals
+  const toNum = (v) => { if (!v) return 0; const n=parseFloat(String(v).replace(/[^0-9.-]/g,"")); return isNaN(n)?0:n; };
+  const totalGross   = scoped.reduce((s,p)=>s+toNum(p.gross),0);
+  const totalAllow   = scoped.reduce((s,p)=>s+toNum(p.allowance),0);
+  const totalDeduct  = scoped.reduce((s,p)=>s+toNum(p.deductions),0);
+  const totalAdj     = scoped.reduce((s,p)=>s+toNum(p.adjustments),0);
+  const totalNet     = scoped.reduce((s,p)=>s+toNum(p.net),0);
+
+  // Client breakdown
+  const byClient = {};
+  scoped.forEach(p => {
+    const c = visible.find(ct=>ct.username.toLowerCase()===(p.username||"").toLowerCase());
+    const cl = c ? c.client : "Unknown";
+    if (!byClient[cl]) byClient[cl] = { gross:0, net:0, count:0 };
+    byClient[cl].gross += toNum(p.gross);
+    byClient[cl].net   += toNum(p.net);
+    byClient[cl].count += 1;
+  });
+
+  const CLIENT_COLORS = ["#2E86C1","#5BC8E8","#16A34A","#D97706","#7C3AED","#DC2626"];
+
+  return (
+    <div style={{ padding:"28px 20px", maxWidth:960, margin:"0 auto" }}>
+      <div style={{ fontSize:20, fontWeight:800, marginBottom:6 }}>Payroll Summary</div>
+      <div style={{ fontSize:14, color:C.muted, marginBottom:20 }}>Computed from payslip records in your scope.</div>
+
+      {/* Period filter */}
+      <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap", alignItems:"center" }}>
+        <select value={filterPeriod} onChange={e=>setFilterPeriod(e.target.value)}
+          style={{ padding:"8px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", background:"#fff", minWidth:200 }}>
+          <option value="">All Periods</option>
+          {allPeriods.map(p=><option key={p} value={p}>{p}</option>)}
+        </select>
+        {filterPeriod && <button onClick={()=>setFilterPeriod("")} style={{ padding:"7px 12px", borderRadius:8, border:`1px solid ${C.border}`, background:"#fff", color:C.muted, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>Clear</button>}
+        <span style={{ fontSize:12, color:C.muted }}>{scoped.length} payslip{scoped.length!==1?"s":""} {filterPeriod?"for this period":"total"}</span>
+      </div>
+
+      {/* Summary cards */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:14, marginBottom:24 }}>
+        {[
+          { label:"Total Gross",    value:fmtCur(totalGross),  color:C.navy },
+          { label:"Total Allowance",value:fmtCur(totalAllow),  color:C.blue },
+          { label:"Total Deductions",value:fmtCur(totalDeduct), color:C.red },
+          { label:"Total Adjustments",value:fmtCur(totalAdj),  color:C.amber },
+          { label:"Total Net Pay",  value:fmtCur(totalNet),    color:C.green },
+        ].map(s=>(
+          <Card key={s.label} style={{ padding:18, borderLeft:`4px solid ${s.color}` }}>
+            <div style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:8 }}>{s.label}</div>
+            <div style={{ fontSize:22, fontWeight:800, color:s.color }}>{s.value}</div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Client breakdown */}
+      <Card>
+        <div style={{ fontSize:15, fontWeight:700, marginBottom:16 }}>Breakdown by Client</div>
+        {Object.keys(byClient).length===0
+          ? <div style={{ color:C.muted, fontSize:14 }}>No payslip data for selected period.</div>
+          : <div style={{ overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                <thead><tr style={{ background:C.off }}>
+                  {["Client","Payslips","Gross Pay","Net Pay","% of Total Net"].map(h=>(
+                    <th key={h} style={{ padding:"10px 14px", textAlign:"left", fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.5px", borderBottom:`1px solid ${C.border}`, whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {Object.entries(byClient).sort((a,b)=>b[1].net-a[1].net).map(([cl,data],i)=>(
+                    <tr key={cl} style={{ borderBottom:`1px solid ${C.border}` }}>
+                      <td style={{ padding:"12px 14px" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <div style={{ width:10, height:10, borderRadius:3, background:CLIENT_COLORS[i%CLIENT_COLORS.length] }}/>
+                          <span style={{ fontWeight:600, fontSize:14 }}>{cl}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding:"12px 14px", fontSize:13, color:C.muted }}>{data.count}</td>
+                      <td style={{ padding:"12px 14px", fontSize:13 }}>{fmtCur(data.gross)}</td>
+                      <td style={{ padding:"12px 14px", fontWeight:700, color:C.blue }}>{fmtCur(data.net)}</td>
+                      <td style={{ padding:"12px 14px" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <div style={{ flex:1, height:6, background:C.off, borderRadius:3, overflow:"hidden" }}>
+                            <div style={{ height:"100%", width:`${totalNet>0?Math.round(data.net/totalNet*100):0}%`, background:CLIENT_COLORS[i%CLIENT_COLORS.length], borderRadius:3 }}/>
+                          </div>
+                          <span style={{ fontSize:12, fontWeight:600, color:C.muted, width:36, textAlign:"right" }}>{totalNet>0?Math.round(data.net/totalNet*100):0}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+        }
+      </Card>
+    </div>
+  );
+}
+
 function ALeaveApprovals({ user, leaves, setLeaves, setContractors, contractors, perms, onNotify }) {
-  const [filter, setFilter] = useState("Pending");
+  const [filter,      setFilter]      = useState("Pending");
+  const [searchLeave, setSearchLeave] = useState("");
   const visible   = getVisible(user,contractors,perms);
   const myLeaves  = leaves.filter(l=>visible.find(c=>c.username===l.username));
-  const filtered  = filter==="All"?myLeaves:myLeaves.filter(l=>l.status===filter);
+  const filtered  = myLeaves
+    .filter(l=>filter==="All"||l.status===filter)
+    .filter(l=>!searchLeave||
+      (l.name||"").toLowerCase().includes(searchLeave.toLowerCase())||
+      (l.username||"").toLowerCase().includes(searchLeave.toLowerCase()));
   const pendingCt = myLeaves.filter(l=>l.status==="Pending").length;
 
   const action = (leaveId, act) => {
@@ -1845,7 +2320,9 @@ function ALeaveApprovals({ user, leaves, setLeaves, setContractors, contractors,
           <div style={{ fontSize:20, fontWeight:800 }}>Leave Approvals</div>
           {pendingCt>0&&<span style={{ background:C.amberBg, color:C.amber, fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:20 }}>{pendingCt} pending</span>}
         </div>
-        <div style={{ display:"flex", gap:8 }}>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+          <input value={searchLeave} onChange={e=>setSearchLeave(e.target.value)} placeholder="Search contractor..."
+            style={{ padding:"6px 12px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:12, fontFamily:"inherit", outline:"none", width:180 }}/>
           {["All","Pending","Approved","Rejected"].map(f=>(
             <button key={f} onClick={()=>setFilter(f)} style={{ background:filter===f?C.navy:C.off, color:filter===f?"#fff":C.muted, border:`1px solid ${filter===f?C.navy:C.border}`, borderRadius:7, padding:"6px 14px", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>{f}</button>
           ))}
@@ -2716,6 +3193,7 @@ function App() {
     });
   };
   const [notifications, setNotifications] = useState([]);
+  const [rateHistory,   setRateHistory]   = useState([]);
 
   // On refresh: re-fetch live data if session was restored from localStorage
   React.useEffect(() => {
@@ -2732,7 +3210,8 @@ function App() {
       if (u.leaveRequests) setLeaves(u.leaveRequests);
       if (u.clients && u.clients.length > 0) setClients(u.clients);
       if (u.announcements) setAnnouncements(u.announcements);
-      if (u.payslips) setPayslips(u.payslips);
+      if (u.allPayslips && u.allPayslips.length > 0) setPayslips(u.allPayslips);
+      else if (u.payslips) setPayslips(u.payslips);
       // Normalize roles on all contractors
       if (u.allContractors && u.allContractors.length > 0) {
         setContractors(u.allContractors.map(c=>({...c, role:normalizeRoleStr(c.role)})));
@@ -2789,6 +3268,8 @@ function App() {
       }
       // Load payslips immediately on login
       if (u.payslips !== undefined) setPayslips(u.payslips||[]);
+      // Load ALL payslips for admin/superadmin
+      if (u.allPayslips !== undefined && u.allPayslips.length > 0) setPayslips(u.allPayslips);
       // Load admin perms from Sheet - normalize keys to lowercase
       if (u.adminPerms && Object.keys(u.adminPerms).length > 0) {
         const normalizedPerms = {};
@@ -2824,6 +3305,7 @@ function App() {
     startDate:      currentUser.profile.startDate,
     email:          currentUser.profile.email,
     supervisor:     currentUser.profile.supervisor||"",
+    dob:           currentUser.profile.dob||"",
     status:         currentUser.profile.status,
     role:           currentUser.profile.role||"contractor",
     photoUrl:       currentUser.profile.photoUrl||"",
@@ -2854,11 +3336,12 @@ function App() {
     "c-pto":           <CPTOPage      contractor={contractor} setPage={setPage}/>,
     "c-leave":         <CLeave        user={currentUser} contractor={contractor} leaves={leaves} setLeaves={setLeaves} setContractors={setContractors} onContractorNotify={addNotification}/>,
     "c-announcements": <CAnnouncements announcements={announcements}/>,
+    "c-calendar":      <CLeaveCalendar contractor={contractor} leaves={leaves} contractors={contractors}/>,
   };
 
   const adminPages = {
     "a-overview":  <AOverview       user={currentUser} contractors={contractors} leaves={leaves} perms={perms} setPage={setPage} announcements={announcements}/>,
-    "a-team":      <ATeam           user={currentUser} contractors={contractors} setContractors={setContractors} perms={perms}/>,
+    "a-team":      <ATeam           user={currentUser} contractors={contractors} setContractors={setContractors} perms={perms} rateHistory={rateHistory} setRateHistory={setRateHistory}/>,
     "a-leave":     <ALeaveApprovals user={currentUser} leaves={leaves} setLeaves={setLeaves} setContractors={setContractors} contractors={contractors} perms={perms} onNotify={addNotification}/>,
     "a-pto":       <APTOManagement  user={currentUser} contractors={contractors} setContractors={setContractors} auditLog={auditLog} setAuditLog={setAuditLog} perms={perms}/>,
     "a-announce":  <AAnnouncements  user={currentUser} announcements={announcements} setAnnouncements={setAnnouncements}/>,
@@ -2867,7 +3350,9 @@ function App() {
     "a-audit":     <AAuditLog       auditLog={auditLog}/>,
     "a-roles":     <ARolesAccess    user={currentUser} contractors={contractors} setContractors={setContractors} perms={perms} setPerms={setPerms} updatePerms={updatePerms}/>,
     "a-payslips":  <APayslips       user={currentUser} contractors={contractors} payslips={payslips} setPayslips={setPayslips} perms={perms}/>,
-    "a-calendar":  <ALeaveCalendar  user={currentUser} contractors={contractors} leaves={leaves} perms={perms}/>,
+    "a-calendar":     <ALeaveCalendar    user={currentUser} contractors={contractors} leaves={leaves} perms={perms}/>,
+    "a-hr-calendar":  <AHRCalendar       contractors={contractors}/>,
+    "a-payroll":      <APayrollSummary   payslips={payslips} contractors={contractors} perms={perms} user={currentUser}/>,
   };
 
   return (
