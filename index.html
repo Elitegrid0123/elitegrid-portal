@@ -26,7 +26,7 @@ const { useState, useRef } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby2aM8FF67yeCpGP-Te-fXz3TzxseBsFWdlAGqGsfuS9PyxxfBuAVG0_zte1xxRtt2n/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz50EWEBiNAwfb30GJ73oVH_APCby0UANj5PeLdjiYAYnLlNOTVgvnU2nvwCZHHR2cW/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -180,8 +180,10 @@ const getVisible = (user, contractors, perms) => {
   const role = normalizeRoleStr(user.role);
   if (role === "superadmin") return contractors;
   const uname = user.username || user._username || (user.profile && user.profile.username);
-  const p = perms[uname];
-  if (!p || !p.assignedClients) return [];
+  // Try all perm keys case-insensitively
+  const permKey = Object.keys(perms).find(k => k.toLowerCase() === (uname||"").toLowerCase());
+  const p = permKey ? perms[permKey] : null;
+  if (!p || !p.assignedClients || p.assignedClients.length === 0) return contractors; // if no perms set, show all for admin
   return contractors.filter(c => p.assignedClients.includes(c.client));
 };
 
@@ -877,9 +879,18 @@ function CLeave({ user, contractor, leaves, setLeaves, setContractors, onContrac
     setErr(""); setSuccess("");
     if (!start) { setErr("Please select a start date."); return; }
     if (!isHalf&&!end) { setErr("Please select an end date."); return; }
-    if (!isHalf&&new Date(end)<new Date(start)) { setErr("End date cannot be before start date."); return; }
+    if (!isHalf&&new Date(end)<new Date(start)) { setErr("End date cannot be before start date. Please check your dates."); return; }
     if (!isHalf&&days===0) { setErr("No working days in selected range (Mon-Fri only)."); return; }
     if (lvType==="VL"&&new Date(start)<new Date()) { setErr("Vacation Leave must be filed before your leave date."); return; }
+    // Check if contractor has enough leave credits
+    if (hours > 0 && balance <= 0) {
+      setErr("You have no available " + lvType + " balance. Please contact your admin.");
+      return;
+    }
+    if (hours > 0 && hours > balance) {
+      setErr("Insufficient " + lvType + " balance. You need " + hours + " hrs but only have " + Math.max(0, balance).toFixed(2) + " hrs available. Your request will be flagged as LWOP — contact your admin first.");
+      return;
+    }
     setLoading(true);
     setTimeout(()=>{
       const newLeave = {
@@ -934,7 +945,15 @@ function CLeave({ user, contractor, leaves, setLeaves, setContractors, onContrac
           {!isHalf && (
             <div>
               <FieldLabel required>End Date</FieldLabel>
-              <FieldInput type="date" value={end} onChange={e=>setEnd(e.target.value)}/>
+              <FieldInput type="date" value={end} min={start||undefined}
+                onChange={e=>{
+                  if (start && e.target.value < start) {
+                    setErr("End date cannot be before start date.");
+                  } else {
+                    setErr("");
+                  }
+                  setEnd(e.target.value);
+                }}/>
             </div>
           )}
         </div>
@@ -2224,7 +2243,13 @@ function ARolesAccess({ user, contractors, setContractors, perms, setPerms }) {
   const [tempClients,setTempClients] = useState([]);
   const admins = contractors.filter(c=>c.status==="Active"); // Super Admin sees all
   const openPerm = (admin) => { setEditPerm(admin); setTempClients((perms[admin.username] && perms[admin.username].assignedClients)||[]); };
-  const savePerm = () => { updatePerms(prev=>({...prev,[editPerm.username]:{assignedClients:tempClients}})); setEditPerm(null); };
+  const savePerm = () => {
+    const newPerms = {...perms, [editPerm.username]:{assignedClients:tempClients}};
+    updatePerms(()=>newPerms);
+    // Save to Sheet so it persists across devices
+    if (!DEMO_MODE) callScript("savePerms", {username:editPerm.username, assignedClients:tempClients.join(",")}, ()=>{}, ()=>{});
+    setEditPerm(null);
+  };
   const toggleCl = (cl) => setTempClients(prev=>prev.includes(cl)?prev.filter(c=>c!==cl):[...prev,cl]);
   const changeRole = (un,role) => setContractors(prev=>prev.map(c=>c.username===un?{...c,role}:c));
 
@@ -2428,6 +2453,10 @@ function App() {
       if (u.allContractors !== undefined && u.allContractors.length > 0) {
         setContractors(u.allContractors.map(c=>({...c, role:normalizeRoleStr(c.role)})));
       }
+      // Load admin perms from Sheet
+      if (u.adminPerms) {
+        updatePerms(()=>u.adminPerms);
+      }
     }
     try { 
       localStorage.setItem("eg_session", JSON.stringify(u));
@@ -2528,3 +2557,4 @@ root.render(React.createElement(App));
 </script>
 </body>
 </html>
+ 
