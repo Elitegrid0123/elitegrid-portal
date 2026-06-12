@@ -26,7 +26,7 @@ const { useState, useRef } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwBtJQmfnCT8jRLWR1goBkDZxgFpqKC0qHupJlBJj9RoYpolRvIILBeh8b1ak2gX5DT/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby2aM8FF67yeCpGP-Te-fXz3TzxseBsFWdlAGqGsfuS9PyxxfBuAVG0_zte1xxRtt2n/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -160,9 +160,11 @@ const isSuperAdmin = (r) => r==="superadmin"||r==="Super Admin";
 
 // Format a value as currency - handles numbers and strings
 const fmtCur = (v) => {
-  if (!v && v!==0) return "-";
+  if (v === null || v === undefined || v === "") return "-";
+  // Handle raw numbers from Sheet (e.g. 10 instead of "$10.00")
+  if (typeof v === "number") return v < 0 ? "($"+Math.abs(v).toFixed(2)+")" : "$"+v.toFixed(2);
   const n = parseFloat(String(v).replace(/[^0-9.-]/g,""));
-  if (isNaN(n)) return String(v);
+  if (isNaN(n)) return "-";
   return (n<0?"($"+Math.abs(n).toFixed(2)+")":"$"+n.toFixed(2));
 };
 
@@ -179,11 +181,12 @@ const normalizeRoleStr = (r) => {
 const getVisible = (user, contractors, perms) => {
   const role = normalizeRoleStr(user.role);
   if (role === "superadmin") return contractors;
-  const uname = user.username || user._username || (user.profile && user.profile.username);
+  const uname = (user.username || user._username || "").toLowerCase();
   // Try all perm keys case-insensitively
-  const permKey = Object.keys(perms).find(k => k.toLowerCase() === (uname||"").toLowerCase());
+  const permKey = Object.keys(perms).find(k => k.toLowerCase() === uname);
   const p = permKey ? perms[permKey] : null;
-  if (!p || !p.assignedClients || p.assignedClients.length === 0) return contractors; // if no perms set, show all for admin
+  // If no perms assigned yet, show nothing - admin must be given access first
+  if (!p || !p.assignedClients || p.assignedClients.length === 0) return [];
   return contractors.filter(c => p.assignedClients.includes(c.client));
 };
 
@@ -2439,9 +2442,13 @@ function ARolesAccess({ user, contractors, setContractors, perms, setPerms }) {
   const [editPerm,setEditPerm]       = useState(null);
   const [tempClients,setTempClients] = useState([]);
   const admins = contractors.filter(c=>c.status==="Active"); // Super Admin sees all
-  const openPerm = (admin) => { setEditPerm(admin); setTempClients((perms[admin.username] && perms[admin.username].assignedClients)||[]); };
+  const openPerm = (admin) => {
+    setEditPerm(admin);
+    const key = Object.keys(perms).find(k=>k.toLowerCase()===(admin.username||"").toLowerCase());
+    setTempClients((key && perms[key] && perms[key].assignedClients) || []);
+  };
   const savePerm = () => {
-    const newPerms = {...perms, [editPerm.username]:{assignedClients:tempClients}};
+    const newPerms = {...perms, [(editPerm.username||"").toLowerCase()]:{assignedClients:tempClients}};
     updatePerms(()=>newPerms);
     // Save to Sheet so it persists across devices
     if (!DEMO_MODE) callScript("savePerms", {username:editPerm.username, assignedClients:tempClients.join(",")}, ()=>{}, ()=>{});
@@ -2464,7 +2471,11 @@ function ARolesAccess({ user, contractors, setContractors, perms, setPerms }) {
                 <div style={{ fontWeight:600, fontSize:14, color:C.navy }}>{a.name} <span style={{ color:C.muted, fontWeight:400 }}>@{a.username}</span></div>
                 <div style={{ display:"flex", gap:6, alignItems:"center", marginTop:4, flexWrap:"wrap" }}>
                   <SBadge s={a.role}/>
-                  {a.role==="admin"&&<span style={{ fontSize:12, color:C.muted }}>Sees: {(perms[a.username] && perms[a.username].assignedClients ? perms[a.username].assignedClients.join(", ") : "No clients assigned")}</span>}
+                  {a.role==="admin"&&<span style={{ fontSize:12, color:C.muted }}>Sees: {(()=>{
+                    const key = Object.keys(perms).find(k=>k.toLowerCase()===(a.username||"").toLowerCase());
+                    const p = key ? perms[key] : null;
+                    return p && p.assignedClients && p.assignedClients.length > 0 ? p.assignedClients.join(", ") : "No clients assigned";
+                  })()}</span>}
                 </div>
               </div>
             </div>
@@ -2572,7 +2583,12 @@ function App() {
   const [perms, setPerms] = useState(() => {
     try {
       const saved = localStorage.getItem("eg_perms");
-      return saved ? JSON.parse(saved) : {...INIT_PERMS};
+      if (!saved) return {...INIT_PERMS};
+      const p = JSON.parse(saved);
+      // Normalize all keys to lowercase
+      const normalized = {};
+      Object.keys(p).forEach(k => { normalized[k.toLowerCase()] = p[k]; });
+      return normalized;
     } catch(e) { return {...INIT_PERMS}; }
   });
 
@@ -2603,8 +2619,14 @@ function App() {
       if (u.announcements) setAnnouncements(u.announcements);
       if (u.payslips) setPayslips(u.payslips);
       // Normalize roles on all contractors
-      if (u.allContractors) {
+      if (u.allContractors && u.allContractors.length > 0) {
         setContractors(u.allContractors.map(c=>({...c, role:normalizeRoleStr(c.role)})));
+      }
+      // Update perms from Sheet on refresh too
+      if (u.adminPerms && Object.keys(u.adminPerms).length > 0) {
+        const np = {};
+        Object.keys(u.adminPerms).forEach(k => { np[k.toLowerCase()] = u.adminPerms[k]; });
+        updatePerms(()=>np);
       }
     }, () => {});
   }, []);
@@ -2646,13 +2668,19 @@ function App() {
       if (u.allLeaves !== undefined && u.allLeaves.length > 0) setLeaves(u.allLeaves||[]);
       if (u.clients !== undefined)       setClients(u.clients||[]);
       if (u.announcements !== undefined) setAnnouncements(u.announcements||[]);
-      // Load all contractors for admin/superadmin view - normalize roles
+      // Load all contractors - normalize roles
       if (u.allContractors !== undefined && u.allContractors.length > 0) {
         setContractors(u.allContractors.map(c=>({...c, role:normalizeRoleStr(c.role)})));
       }
-      // Load admin perms from Sheet
-      if (u.adminPerms) {
-        updatePerms(()=>u.adminPerms);
+      // Load payslips immediately on login
+      if (u.payslips !== undefined) setPayslips(u.payslips||[]);
+      // Load admin perms from Sheet - normalize keys to lowercase
+      if (u.adminPerms && Object.keys(u.adminPerms).length > 0) {
+        const normalizedPerms = {};
+        Object.keys(u.adminPerms).forEach(k => {
+          normalizedPerms[k.toLowerCase()] = u.adminPerms[k];
+        });
+        updatePerms(()=>normalizedPerms);
       }
     }
     try { 
