@@ -26,7 +26,7 @@ const { useState, useRef } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby2aM8FF67yeCpGP-Te-fXz3TzxseBsFWdlAGqGsfuS9PyxxfBuAVG0_zte1xxRtt2n/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby91zkZuCCTeLszC5rKnye1jc54IBS2h7ODKS0rbeTXQOkhQV3G16XnitMMbfxKNBUW/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -168,10 +168,19 @@ const fmtCur = (v) => {
 
 const isAdmin      = (r) => r==="admin"||r==="Admin"||isSuperAdmin(r);
 
+const normalizeRoleStr = (r) => {
+  if (!r) return "contractor";
+  const v = String(r).trim().toLowerCase().replace(/\s+/g,"");
+  if (v==="superadmin") return "superadmin";
+  if (v==="admin") return "admin";
+  return "contractor";
+};
+
 const getVisible = (user, contractors, perms) => {
-  if (user.role === "superadmin" || user.role === "Super Admin") return contractors;
-  const p = perms[user.username];
-  if (!p) return [];
+  const role = normalizeRoleStr(user.role);
+  if (role === "superadmin") return contractors;
+  const p = perms[user.username] || perms[user._username];
+  if (!p || !p.assignedClients) return [];
   return contractors.filter(c => p.assignedClients.includes(c.client));
 };
 
@@ -492,7 +501,7 @@ function ContractorNav({ page, setPage, user, onLogout, onChPw, notifications, o
 // ── ADMIN NAV WITH GROUPED DROPDOWNS ─────────────────────
 function AdminNav({ page, setPage, user, onLogout, notifications, onClearNotifs, onMarkRead }) {
   const [openGroup, setOpenGroup] = useState(null);
-  const isSA = user.role === "superadmin";
+  const isSA = normalizeRoleStr(user.role) === "superadmin";
 
   const groups = [
     { id:"overview", label:"Overview", direct:"a-overview" },
@@ -1883,7 +1892,7 @@ function AClients({ user, contractors, clients, setClients }) {
   const [search,     setSearch]     = useState("");
   const [filterSt,   setFilterSt]   = useState("All");
 
-  const isSA = user.role === "superadmin";
+  const isSA = normalizeRoleStr(user.role) === "superadmin";
 
   const STATUS_COLORS = {
     Active:   [C.greenBg, C.green],
@@ -2214,7 +2223,7 @@ function ARolesAccess({ user, contractors, setContractors, perms, setPerms }) {
   const [tempClients,setTempClients] = useState([]);
   const admins = contractors.filter(c=>c.status==="Active"); // Super Admin sees all
   const openPerm = (admin) => { setEditPerm(admin); setTempClients((perms[admin.username] && perms[admin.username].assignedClients)||[]); };
-  const savePerm = () => { setPerms(prev=>({...prev,[editPerm.username]:{assignedClients:tempClients}})); setEditPerm(null); };
+  const savePerm = () => { updatePerms(prev=>({...prev,[editPerm.username]:{assignedClients:tempClients}})); setEditPerm(null); };
   const toggleCl = (cl) => setTempClients(prev=>prev.includes(cl)?prev.filter(c=>c!==cl):[...prev,cl]);
   const changeRole = (un,role) => setContractors(prev=>prev.map(c=>c.username===un?{...c,role}:c));
 
@@ -2331,6 +2340,29 @@ function App() {
     };
   }, [currentUser, resetTimer]);
 
+  const [contractors,   setContractors]   = useState([...INIT_CONTRACTORS]);
+  const [payslips,      setPayslips]      = useState([...INIT_PAYSLIPS]);
+  const [leaves,        setLeaves]        = useState([...INIT_LEAVES]);
+  const [announcements, setAnnouncements] = useState([...INIT_ANNOUNCEMENTS]);
+  const [auditLog,      setAuditLog]      = useState([...INIT_AUDIT]);
+  const [clients,       setClients]       = useState([...INIT_CLIENTS]);
+  const [perms, setPerms] = useState(() => {
+    try {
+      const saved = localStorage.getItem("eg_perms");
+      return saved ? JSON.parse(saved) : {...INIT_PERMS};
+    } catch(e) { return {...INIT_PERMS}; }
+  });
+
+  // Persist perms whenever they change
+  const updatePerms = (fn) => {
+    updatePerms(prev => {
+      const next = typeof fn === 'function' ? fn(prev) : fn;
+      try { localStorage.setItem("eg_perms", JSON.stringify(next)); } catch(e) {}
+      return next;
+    });
+  };
+  const [notifications, setNotifications] = useState([]);
+
   // On refresh: re-fetch live data if session was restored from localStorage
   React.useEffect(() => {
     if (!currentUser || DEMO_MODE) return;
@@ -2347,16 +2379,12 @@ function App() {
       if (u.clients && u.clients.length > 0) setClients(u.clients);
       if (u.announcements) setAnnouncements(u.announcements);
       if (u.payslips) setPayslips(u.payslips);
+      // Normalize roles on all contractors
+      if (u.allContractors) {
+        setContractors(u.allContractors.map(c=>({...c, role:normalizeRoleStr(c.role)})));
+      }
     }, () => {});
   }, []);
-  const [contractors,   setContractors]   = useState([...INIT_CONTRACTORS]);
-  const [payslips,      setPayslips]      = useState([...INIT_PAYSLIPS]);
-  const [leaves,        setLeaves]        = useState([...INIT_LEAVES]);
-  const [announcements, setAnnouncements] = useState([...INIT_ANNOUNCEMENTS]);
-  const [auditLog,      setAuditLog]      = useState([...INIT_AUDIT]);
-  const [clients,       setClients]       = useState([...INIT_CLIENTS]);
-  const [perms,         setPerms]         = useState({...INIT_PERMS});
-  const [notifications, setNotifications] = useState([]);
 
   const addNotification = React.useCallback((title, body) => {
     const time = new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
@@ -2394,9 +2422,9 @@ function App() {
       if (u.allLeaves !== undefined && u.allLeaves.length > 0) setLeaves(u.allLeaves||[]);
       if (u.clients !== undefined)       setClients(u.clients||[]);
       if (u.announcements !== undefined) setAnnouncements(u.announcements||[]);
-      // Load all contractors for admin/superadmin view
+      // Load all contractors for admin/superadmin view - normalize roles
       if (u.allContractors !== undefined && u.allContractors.length > 0) {
-        setContractors(u.allContractors);
+        setContractors(u.allContractors.map(c=>({...c, role:normalizeRoleStr(c.role)})));
       }
     }
     try { 
@@ -2406,14 +2434,14 @@ function App() {
       if (u._password) localStorage.setItem("eg_pw", u._password);
     } catch(e) {}
     setCurrentUser(u);
-    setPage((u.role||u.profile&&u.profile.role)==="contractor"?"c-dashboard":"a-overview");
+    setPage(normalizeRoleStr(u.role||u.profile&&u.profile.role)==="contractor"?"c-dashboard":"a-overview");
   };
 
   const logout = () => { try { localStorage.removeItem("eg_session"); localStorage.removeItem("eg_un"); localStorage.removeItem("eg_pw"); } catch(e) {} setCurrentUser(null); setPage("c-dashboard"); setChPwOpen(false); };
 
   if (!currentUser) return <LoginScreen onLogin={login}/>;
 
-  const isContractor = currentUser.role!=="superadmin" && currentUser.role!=="admin";
+  const _nr = normalizeRoleStr(currentUser.role); const isContractor = _nr!=="superadmin" && _nr!=="admin";
   // For live data, build contractor object from profile
   const liveContractor = currentUser.profile ? {
     username:       currentUser._username,
@@ -2498,4 +2526,3 @@ root.render(React.createElement(App));
 </script>
 </body>
 </html>
- 
