@@ -48,7 +48,7 @@ const { useState, useRef, useEffect, useCallback } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzY9xpG5q88azpdOD-yqZy5VNzM94VLguy8fufoNIAaJY27-k-4SW0wIjCDyGgOlNJ7/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw0C1BPzkJruGcWf3tWcM3F5XBj38T2KngeyUkBaA1pjGgbmcTe4nOCZ1uL3hmZoWb1/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -482,7 +482,7 @@ function PhotoUpload({ currentUrl, onSave, onClose, username }) {
       if (!DEMO_MODE && username) {
         // Upload to Google Drive via backend
         setUploading(true);
-        callScript("uploadPhoto", { username, imageData:b64, mimeType }, (json) => {
+        callScript("uploadPhoto", { username, name: (window.__egUploadName||""), email: (window.__egUploadEmail||""), imageData:b64, mimeType }, (json) => {
           setUploading(false);
           if (json && json.success) {
             onSave(json.photoUrl);
@@ -1485,7 +1485,7 @@ function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
       <ContractorDocs contractor={c} user={{name:"",_username:c.username}} canManage={false}/>
 
       {/* ── MODALS ── */}
-      {photoModal && <PhotoUpload currentUrl={c.photoUrl} username={c.username} onSave={savePhoto} onClose={()=>setPhotoModal(false)}/>}
+      {photoModal && (() => { window.__egUploadName = c.name || ""; window.__egUploadEmail = c.email || ""; return <PhotoUpload currentUrl={c.photoUrl} username={c.username || (currentUser && (currentUser._username || currentUser.username)) || ""} onSave={savePhoto} onClose={()=>setPhotoModal(false)}/>; })()}
       {chPw && <ChangePwModal user={contractor} onClose={()=>setChPw(false)}/>}
 
       {/* Personal info edit modal */}
