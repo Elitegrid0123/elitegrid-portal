@@ -48,7 +48,7 @@ const { useState, useRef, useEffect, useCallback } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx2wis62sChAkTNRm-oCH9UpO5leBv_FmjujV-wgo6nzl0jXO9JcDh676yc5WmCt2e_/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx496iEIZ11DOurThKPfkKnPIEMtS-AAiKcxJNpIR_XyP1iVQVOIMR0bkk_zpax_Whp/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -231,6 +231,34 @@ const fmtCur = (v) => {
   return (n<0?"($"+Math.abs(n).toFixed(2)+")":"$"+n.toFixed(2));
 };
 
+// Format rate: "7" → "$7.00", "$7/hr" → "$7.00/hr", "1500" → "$1,500.00"
+const fmtRate = (v) => {
+  if (!v) return "-";
+  const s = String(v).trim();
+  const numMatch = s.match(/([\d,]+\.?\d*)/);
+  if (!numMatch) return s;
+  const num = parseFloat(numMatch[1].replace(/,/g,""));
+  if (isNaN(num)) return s;
+  const suffix = s.replace(/^[\s$]*[\d,]+\.?\d*/, "").trim();
+  return "$" + num.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}) + (suffix?suffix:"");
+};
+
+// Robustly format any date value (ISO string, Apps Script date serial, or already-formatted string)
+const fmtRelease = (v) => {
+  if (!v || v === "") return "-";
+  const s = String(v).trim();
+  // Already formatted like "Jun 5, 2025" — return as is
+  if (/^[A-Za-z]{3}\s+\d{1,2},\s*\d{4}$/.test(s)) return s;
+  // Try parsing as a date
+  try {
+    const d = new Date(s);
+    if (!isNaN(d.getTime()) && d.getFullYear() > 2000) {
+      return d.toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
+    }
+  } catch(e) {}
+  return s;
+};
+
 const isAdmin      = (r) => r==="admin"||r==="Admin"||isSuperAdmin(r);
 
 const normalizeRoleStr = (r) => {
@@ -283,9 +311,15 @@ const SBadge = ({ s }) => {
 };
 
 const Avatar = ({ name, photoUrl, size=48 }) => {
+  const [imgErr, setImgErr] = React.useState(false);
   const initials = name ? name.split(" ").map(n=>n[0]).join("").slice(0,2) : "?";
-  if (photoUrl) return <img src={photoUrl} alt={name} style={{ width:size, height:size, borderRadius:"50%", objectFit:"cover", flexShrink:0, border:`2px solid ${C.border}` }}/>;
-  return <div style={{ width:size, height:size, borderRadius:"50%", background:`linear-gradient(135deg,${C.cyan},${C.blueDk})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:size*0.35, fontWeight:800, color:"#fff", flexShrink:0 }}>{initials}</div>;
+  if (!photoUrl || imgErr) {
+    return <div style={{ width:size, height:size, borderRadius:"50%", background:`linear-gradient(135deg,${C.cyan},${C.blueDk})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:size*0.35, fontWeight:800, color:"#fff", flexShrink:0 }}>{initials}</div>;
+  }
+  return <img src={photoUrl} alt={name}
+    style={{ width:size, height:size, borderRadius:"50%", objectFit:"cover", flexShrink:0, border:`2px solid ${C.border}` }}
+    onError={()=>setImgErr(true)}
+  />;
 };
 
 const FieldLabel = ({ children, required }) => (
@@ -325,39 +359,59 @@ const Alert = ({ type, children }) => {
 };
 
 // ── PHOTO UPLOAD COMPONENT ────────────────────────────────
-function PhotoUpload({ currentUrl, onSave, onClose }) {
-  const [tab,    setTab]    = useState("upload");
-  const [url,    setUrl]    = useState(currentUrl||"");
-  const [preview,setPreview]= useState(currentUrl||"");
-  const [err,    setErr]    = useState("");
+function PhotoUpload({ currentUrl, onSave, onClose, username }) {
+  const [tab,      setTab]      = useState("upload");
+  const [url,      setUrl]      = useState(currentUrl&&!currentUrl.startsWith("data:")?currentUrl:"");
+  const [preview,  setPreview]  = useState(currentUrl||"");
+  const [b64,      setB64]      = useState("");
+  const [mimeType, setMimeType] = useState("image/jpeg");
+  const [uploading,setUploading]= useState(false);
+  const [err,      setErr]      = useState("");
   const fileRef = useRef();
 
   const handleFile = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) { setErr("Please select an image file."); return; }
-    if (file.size > 2*1024*1024) { setErr("Image must be under 2MB."); return; }
+    if (file.size > 5*1024*1024) { setErr("Image must be under 5MB."); return; }
+    setMimeType(file.type);
     const reader = new FileReader();
-    reader.onload = (ev) => { setPreview(ev.target.result); setUrl(ev.target.result); setErr(""); };
+    reader.onload = (ev) => { setB64(ev.target.result); setPreview(ev.target.result); setErr(""); };
     reader.readAsDataURL(file);
   };
 
-  const handleUrl = (v) => {
-    setUrl(v);
-    setPreview(v);
-    setErr("");
-  };
+  const handleUrl = (v) => { setUrl(v); setPreview(v); setB64(""); setErr(""); };
 
   const save = () => {
-    if (!url) { setErr("Please add a photo first."); return; }
-    onSave(url);
+    if (tab === "upload") {
+      if (!b64) { setErr("Please select a photo first."); return; }
+      if (!DEMO_MODE && username) {
+        // Upload to Google Drive via backend
+        setUploading(true);
+        callScript("uploadPhoto", { username, imageData:b64, mimeType }, (json) => {
+          setUploading(false);
+          if (json && json.success) {
+            onSave(json.photoUrl);
+            toast("Profile photo saved to Drive ✓");
+          } else {
+            setErr((json&&json.error)||"Upload failed. Please try again.");
+          }
+        }, () => { setUploading(false); setErr("Connection error. Please try again."); });
+      } else {
+        // Demo mode — save b64 locally
+        onSave(b64);
+      }
+    } else {
+      if (!url.trim()) { setErr("Please enter an image URL."); return; }
+      if (!url.startsWith("http")) { setErr("URL must start with http or https."); return; }
+      onSave(url.trim());
+    }
   };
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(27,42,74,0.65)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, padding:16 }} onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{ background:"#fff", borderRadius:16, padding:32, width:"100%", maxWidth:420, boxShadow:"0 24px 80px rgba(0,0,0,0.3)" }}>
+      <div style={{ background:"#fff", borderRadius:16, padding:32, width:"100%", maxWidth:440, boxShadow:"0 24px 80px rgba(0,0,0,0.3)" }}>
         <div style={{ fontSize:18, fontWeight:800, color:C.navy, marginBottom:6 }}>Profile Photo</div>
-        <div style={{ fontSize:13, color:C.muted, marginBottom:20 }}>Upload a photo or paste an image URL.</div>
 
         {preview && (
           <div style={{ display:"flex", justifyContent:"center", marginBottom:20 }}>
@@ -365,35 +419,39 @@ function PhotoUpload({ currentUrl, onSave, onClose }) {
           </div>
         )}
 
-        <div style={{ display:"flex", gap:8, marginBottom:16 }}>
-          {[["upload","Upload File"],["url","Paste URL"]].map(([t,l]) => (
-            <button key={t} onClick={()=>setTab(t)}
-              style={{ flex:1, padding:"8px", borderRadius:8, border:`1.5px solid ${tab===t?C.blue:C.border}`, background:tab===t?"#DBEAFE":"#fff", color:tab===t?C.blue:C.muted, fontSize:13, fontWeight:tab===t?700:500, cursor:"pointer", fontFamily:"inherit" }}>
+        <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+          {[["upload","Upload File"],["url","Use URL"]].map(([t,l]) => (
+            <button key={t} onClick={()=>{ setTab(t); setErr(""); }}
+              style={{ flex:1, padding:"8px", borderRadius:8, border:`1.5px solid ${tab===t?C.blue:C.border}`, background:tab===t?"#DBEAFE":"#fff", color:tab===t?C.blue:C.muted, fontSize:12, fontWeight:tab===t?700:500, cursor:"pointer", fontFamily:"inherit" }}>
               {l}
             </button>
           ))}
         </div>
 
         {tab === "upload" ? (
-          <div>
-            <div onClick={()=>fileRef.current.click()} style={{ border:`2px dashed ${C.border}`, borderRadius:10, padding:"28px 20px", textAlign:"center", cursor:"pointer", marginBottom:14 }}>
-              <div style={{ fontSize:24, marginBottom:8 }}>+</div>
-              <div style={{ fontSize:13, color:C.muted }}>Click to choose a photo</div>
-              <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>JPG, PNG up to 2MB</div>
+          <div style={{ marginBottom:14 }}>
+            <div onClick={()=>fileRef.current.click()} style={{ border:`2px dashed ${C.border}`, borderRadius:10, padding:"24px 20px", textAlign:"center", cursor:"pointer" }}>
+              <div style={{ fontSize:28, marginBottom:6 }}>📷</div>
+              <div style={{ fontSize:13, color:C.muted }}>{b64?"Photo selected ✓ — click to change":"Click to choose a photo"}</div>
+              <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>JPG, PNG up to 5MB · Saved to Elite Grid Drive</div>
             </div>
             <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{ display:"none" }}/>
+            {b64 && <div style={{ fontSize:11, color:C.green, marginTop:6, padding:"6px 10px", background:C.greenBg, borderRadius:6, lineHeight:1.5 }}>
+              ✓ Photo ready — click Save to upload to Google Drive
+            </div>}
           </div>
         ) : (
           <div style={{ marginBottom:14 }}>
             <FieldLabel>Image URL</FieldLabel>
-            <FieldInput value={url} onChange={e=>handleUrl(e.target.value)} placeholder="https://example.com/photo.jpg" />
+            <FieldInput value={url} onChange={e=>handleUrl(e.target.value)} placeholder="https://drive.google.com/uc?id=..."/>
+            <div style={{ fontSize:11, color:C.muted, marginTop:5, lineHeight:1.5 }}>Paste a direct link to your hosted photo.</div>
           </div>
         )}
 
         {err && <Alert type="error">{err}</Alert>}
-        <div style={{ display:"flex", gap:10 }}>
-          <Btn onClick={save} style={{ flex:1, padding:11 }}>Save Photo</Btn>
-          <Btn variant="secondary" onClick={onClose} style={{ flex:1, padding:11 }}>Cancel</Btn>
+        <div style={{ display:"flex", gap:10, marginTop:4 }}>
+          <Btn onClick={save} disabled={uploading} style={{ flex:1, padding:11 }}>{uploading?"Uploading...":"Save Photo"}</Btn>
+          <Btn variant="secondary" onClick={onClose} disabled={uploading} style={{ flex:1, padding:11 }}>Cancel</Btn>
         </div>
       </div>
     </div>
@@ -783,12 +841,26 @@ function ChangePwModal({ user, onClose }) {
   const submit = () => {
     setErr("");
     if (!cur||!nw||!conf)        { setErr("Please fill in all fields."); return; }
-    if (cur!==user.password)     { setErr("Current password is incorrect."); return; }
+    const storedPw = user._password || user.password || "";
+    if (cur!==storedPw)          { setErr("Current password is incorrect."); return; }
     if (nw.length<6)             { setErr("New password must be at least 6 characters."); return; }
     if (nw!==conf)               { setErr("New passwords do not match."); return; }
     if (nw===cur)                { setErr("Must be different from current password."); return; }
     setLoading(true);
-    setTimeout(()=>{ user.password=nw; setOk(true); setLoading(false); setTimeout(onClose,2000); },700);
+    if (!DEMO_MODE) {
+      callScript("changePassword", { username:user._username||user.username, currentPassword:cur, newPassword:nw }, (json) => {
+        if (json && json.success) {
+          user._password = nw; user.password = nw;
+          setOk(true); setLoading(false);
+          toast("Password updated successfully ✓");
+          setTimeout(onClose, 2000);
+        } else {
+          setErr((json&&json.error)||"Failed to update. Please try again."); setLoading(false);
+        }
+      }, () => { setErr("Connection error. Please try again."); setLoading(false); });
+    } else {
+      setTimeout(()=>{ user._password=nw; user.password=nw; setOk(true); setLoading(false); toast("Password updated successfully ✓"); setTimeout(onClose,2000); },700);
+    }
   };
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(27,42,74,0.65)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, padding:16 }} onClick={e=>e.target===e.currentTarget&&onClose()}>
@@ -1015,63 +1087,400 @@ function ContractorDocs({ contractor, user, canManage }) {
   );
 }
 
-function CProfile({ contractor, setContractors }) {
+function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
   const c = contractor;
-  const [photoModal, setPhotoModal] = useState(false);
-  const [chPw,       setChPw]       = useState(false);
-  const initials = c.name.split(" ").map(n=>n[0]).join("").slice(0,2);
-  const fields = [["Full Name",c.name],["Position",c.position],["Immediate Supervisor",c.supervisor||"Not set"],["Client Account",c.client],["Service Tier",c.tier],["Rate",c.rate],["Start Date",c.startDate],["Email",c.email],["Status",c.status]];
+  const [photoModal,    setPhotoModal]    = useState(false);
+  const [chPw,          setChPw]          = useState(false);
+  const [editPersonal,  setEditPersonal]  = useState(false);
+  const [bankModal,     setBankModal]     = useState(false);
+  const [personalForm,  setPersonalForm]  = useState({});
+  const [bankForm,      setBankForm]      = useState({});
+  const [personalErr,   setPersonalErr]   = useState("");
+  const [bankErr,       setBankErr]       = useState("");
+  const [savingPersonal,setSavingPersonal]= useState(false);
+  const [savingBank,    setSavingBank]    = useState(false);
 
-  const savePhoto = (url) => {
-    setContractors(prev => prev.map(ct => ct.username===c.username ? { ...ct, photoUrl:url } : ct));
-    setPhotoModal(false);
+  const initials  = c.name ? c.name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
+  const bankInfo  = (currentUser&&currentUser._bankInfo)||{};
+  const payslips  = (currentUser&&currentUser._payslips)||[];
+  const myUn      = (currentUser&&(currentUser._username||currentUser.username)||"").toLowerCase();
+  const mySlips   = payslips.filter(p=>!p.username||p.username.toLowerCase()===myUn);
+
+  // Tenure calculation
+  const calcTenure = (sd) => {
+    if (!sd) return "—";
+    const start = new Date(sd);
+    if (isNaN(start.getTime())) return sd;
+    const now   = new Date();
+    let yrs  = now.getFullYear() - start.getFullYear();
+    let mons = now.getMonth()    - start.getMonth();
+    if (mons < 0) { yrs--; mons += 12; }
+    if (yrs === 0) return mons + " mo";
+    return yrs + " yr" + (yrs!==1?"s":"") + (mons>0?" "+mons+" mo":"");
   };
 
+  const savePhoto = (url) => {
+    setContractors(prev=>prev.map(ct=>ct.username===c.username?{...ct,photoUrl:url}:ct));
+    if (!DEMO_MODE) callScript("updateContractor",{username:c.username,photoUrl:url},()=>{},()=>{});
+    setPhotoModal(false);
+    toast("Profile photo updated ✓");
+  };
+
+  const openPersonal = () => {
+    setPersonalForm({
+      dob:          c.dob||"",
+      personalGmail:c.personalGmail||"",
+      addrStreet:   c.addrStreet||"",
+      addrCity:     c.addrCity||"",
+      addrProvince: c.addrProvince||"",
+      addrCountry:  c.addrCountry||"",
+      addrZip:      c.addrZip||"",
+    });
+    setPersonalErr("");
+    setEditPersonal(true);
+  };
+
+  const savePersonal = () => {
+    if (personalForm.personalGmail && personalForm.personalGmail.trim() !== "") {
+      if (!personalForm.personalGmail.trim().toLowerCase().endsWith("@gmail.com")) {
+        setPersonalErr("Personal email must be a valid @gmail.com address."); return;
+      }
+    }
+    setSavingPersonal(true);
+    const updates = { username:c.username, ...personalForm };
+    if (!DEMO_MODE) {
+      callScript("updateContractor", updates, () => {
+        setContractors(prev=>prev.map(ct=>ct.username===c.username?{...ct,...personalForm}:ct));
+        setSavingPersonal(false);
+        setEditPersonal(false);
+        toast("Personal info saved ✓");
+      }, () => { setPersonalErr("Failed to save. Try again."); setSavingPersonal(false); });
+    } else {
+      setContractors(prev=>prev.map(ct=>ct.username===c.username?{...ct,...personalForm}:ct));
+      setSavingPersonal(false);
+      setEditPersonal(false);
+      toast("Personal info saved ✓");
+    }
+  };
+
+  const openBank = () => {
+    const PH_BANKS = ["BDO Unibank","Bank of the Philippine Islands (BPI)","Metrobank","Land Bank of the Philippines","Development Bank of the Philippines (DBP)","Philippine National Bank (PNB)","Security Bank","China Banking Corporation (Chinabank)","RCBC (Rizal Commercial Banking Corporation)","EastWest Bank","UnionBank of the Philippines","PSBank (Philippine Savings Bank)","Maybank Philippines","Citibank Philippines","HSBC Philippines","Standard Chartered Philippines","Bank of Commerce","Asia United Bank (AUB)","Philippine Bank of Communications (PBCom)","Sterling Bank of Asia","Robinsons Bank","CTBC Bank Philippines","PBB (Philippine Business Bank)","Producers Savings Bank","Wealth Development Bank","AllBank","Enterprise Bank","Dungganon Bank","1st Valley Bank","Rural Bank of Batangas","GCash (G-Xchange Inc.)","PayMaya / Maya Bank","Tonik Digital Bank","GoTyme Bank","SeaBank Philippines","OFBank (Overseas Filipino Bank)","CIMB Bank Philippines","ING Bank Philippines","SB Finance","BPI Direct BanKo"];
+    const existing = bankInfo.bankName||"";
+    const preset = PH_BANKS.includes(existing) ? existing : (existing ? "__manual__" : "");
+    setBankForm({
+      bankName:     existing,
+      accountNumber:bankInfo.accountNumber||"",
+      swiftCode:    bankInfo.swiftCode||"",
+      wiseEmail:    bankInfo.wiseEmail||"",
+      payoutMethod: bankInfo.payoutMethod||"Wise",
+      _bankPreset:  preset,
+    });
+    setBankErr("");
+    setBankModal(true);
+  };
+
+  const saveBank = () => {
+    if (!bankForm.bankName.trim())     { setBankErr("Bank name is required."); return; }
+    if (!bankForm.accountNumber.trim()){ setBankErr("Account number is required."); return; }
+    if (!bankForm.payoutMethod)        { setBankErr("Payout method is required."); return; }
+    setSavingBank(true);
+    const payload = { username:c.username, ...bankForm };
+    if (!DEMO_MODE) {
+      callScript("saveBankInfo", payload, () => {
+        if (setCurrentUser) setCurrentUser(prev=>({...prev, _bankInfo:{...bankForm}}));
+        setSavingBank(false); setBankModal(false);
+        toast("Payment info saved ✓");
+      }, () => { setBankErr("Failed to save. Try again."); setSavingBank(false); });
+    } else {
+      if (setCurrentUser) setCurrentUser(prev=>({...prev, _bankInfo:{...bankForm}}));
+      setSavingBank(false); setBankModal(false);
+      toast("Payment info saved ✓");
+    }
+  };
+
+  const sp = (k,v) => setPersonalForm(f=>({...f,[k]:v}));
+  const sb = (k,v) => setBankForm(f=>({...f,[k]:v}));
+
+  const fieldStyle = { padding:"10px 0", borderBottom:`1px solid ${C.border}` };
+  const labelStyle = { fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.6px", marginBottom:3 };
+  const valStyle   = { fontSize:14, fontWeight:500, color:C.navy };
+  const mutedVal   = { fontSize:13, color:C.muted, fontStyle:"italic" };
+
+  const SectionCard = ({icon, title, action, children}) => (
+    <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${C.border}`, overflow:"hidden", marginBottom:14 }}>
+      <div style={{ padding:"14px 18px 10px", display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:`1px solid ${C.border}` }}>
+        <div style={{ fontSize:12, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.6px", display:"flex", alignItems:"center", gap:7 }}>
+          <span>{icon}</span>{title}
+        </div>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+
+  const LockBadge = () => (
+    <span style={{ fontSize:11, color:C.muted, display:"flex", alignItems:"center", gap:4 }}>🔒 Admin edits only</span>
+  );
+
+  const tiers = { LAUNCH:"Starter", ANCHOR:"Core Team", ELEVATE:"Senior/Specialist" };
+  const fullAddr = [c.addrStreet, c.addrCity, c.addrProvince, c.addrCountry, c.addrZip].filter(Boolean).join(", ");
+
   return (
-    <div style={{ padding:"28px 20px", maxWidth:700, margin:"0 auto" }}>
+    <div style={{ padding:"28px 20px", maxWidth:900, margin:"0 auto" }}>
       <div style={{ fontSize:20, fontWeight:800, marginBottom:20 }}>My Profile</div>
-      <Card>
-        <div style={{ display:"flex", alignItems:"flex-end", gap:16, marginBottom:22 }}>
-          <div style={{ position:"relative" }}>
-            {c.photoUrl
-              ? <img src={c.photoUrl} alt={c.name} style={{ width:80, height:80, borderRadius:"50%", objectFit:"cover", border:`3px solid ${C.cyan}` }}/>
-              : <div style={{ width:80, height:80, borderRadius:"50%", background:`linear-gradient(135deg,${C.cyan},${C.blueDk})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:28, fontWeight:900, color:"#fff" }}>{initials}</div>
-            }
-          </div>
-          <div>
-            <div style={{ fontSize:18, fontWeight:800, color:C.navy, marginBottom:4 }}>{c.name}</div>
-            <button onClick={()=>setPhotoModal(true)} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:7, padding:"6px 14px", fontSize:12, color:C.blue, fontWeight:600, cursor:"pointer" }}>
-              {c.photoUrl ? "Change Photo" : "Add Photo"}
-            </button>
-            <button onClick={()=>setChPw(true)} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:7, padding:"6px 14px", fontSize:12, color:C.muted, fontWeight:600, cursor:"pointer" }}>
-              Change Password
-            </button>
-            {!c.photoUrl && <span style={{ fontSize:11, color:C.amber, marginLeft:10, fontWeight:600 }}>Photo missing</span>}
-          </div>
-        </div>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))" }}>
-          {fields.map(([l,v]) => (
-            <div key={l} style={{ padding:"14px 0", borderBottom:`1px solid ${C.border}` }}>
-              <div style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.6px", marginBottom:4 }}>{l}</div>
-              <div style={{ fontSize:15, fontWeight:600, color:l==="Status"?C.green:C.navy }}>{v}</div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"220px 1fr", gap:16, alignItems:"start" }}>
+
+        {/* ── LEFT PANEL ── */}
+        <div>
+          {/* Avatar card */}
+          <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${C.border}`, padding:20, textAlign:"center", marginBottom:14 }}>
+            <div style={{ position:"relative", display:"inline-block", marginBottom:10 }}>
+              {c.photoUrl
+                ? <img src={c.photoUrl} alt={c.name} style={{ width:80, height:80, borderRadius:"50%", objectFit:"cover", border:`3px solid ${C.cyan}` }} onError={e=>{e.target.style.display="none";e.target.parentNode.querySelector(".avatar-initials")&&(e.target.parentNode.querySelector(".avatar-initials").style.display="flex");}}/>
+                : <div style={{ width:80, height:80, borderRadius:"50%", background:`linear-gradient(135deg,${C.cyan},${C.blueDk})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, fontWeight:800, color:"#fff" }}>{initials}</div>
+              }
             </div>
-          ))}
+            <div style={{ fontSize:16, fontWeight:800, color:C.navy, marginBottom:2 }}>{c.name}</div>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>{c.position}</div>
+            <div style={{ display:"flex", gap:6, justifyContent:"center", flexWrap:"wrap", marginBottom:14 }}>
+              {c.client && <span style={{ fontSize:10, fontWeight:700, background:"#DBEAFE", color:"#1D4ED8", padding:"2px 9px", borderRadius:20 }}>{c.client}</span>}
+              {c.tier   && <span style={{ fontSize:10, fontWeight:700, background:"#DCFCE7", color:"#166534", padding:"2px 9px", borderRadius:20 }}>{c.tier}</span>}
+              {c.status && <span style={{ fontSize:10, fontWeight:700, background:c.status==="Active"?C.greenBg:C.off, color:c.status==="Active"?C.green:C.muted, padding:"2px 9px", borderRadius:20 }}>{c.status}</span>}
+            </div>
+            <div style={{ borderTop:`1px solid ${C.border}`, paddingTop:12, display:"flex", flexDirection:"column", gap:8 }}>
+              <button onClick={()=>setPhotoModal(true)} style={{ width:"100%", background:C.off, border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 12px", fontSize:12, color:C.blue, fontWeight:600, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                📷 {c.photoUrl?"Change Photo":"Add Photo"}
+              </button>
+              <button onClick={()=>setChPw(true)} style={{ width:"100%", background:C.off, border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 12px", fontSize:12, color:C.muted, fontWeight:600, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                🔒 Change Password
+              </button>
+            </div>
+          </div>
+
+          {/* Quick stats card */}
+          <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${C.border}`, padding:"16px 18px" }}>
+            <div style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.6px", marginBottom:12 }}>Quick Stats</div>
+            {[
+              ["Tenure",         calcTenure(c.startDate)],
+              ["Contract",       c.contractType||"—"],
+              ["Payslips on file",mySlips.length||"0"],
+              ["Rate",           fmtRate(c.rate)],
+              ["VL Balance",     Math.max(0,parseFloat(((c.vlAccrued||0)-(c.vlUsed||0)-(c.vlPending||0)).toFixed(2)))+" hrs"],
+              ["SL Balance",     Math.max(0,parseFloat(((c.slTotal||0)-(c.slUsed||0)-(c.slPending||0)).toFixed(2)))+" hrs"],
+            ].map(([l,v])=>(
+              <div key={l} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:`1px solid ${C.border}` }}>
+                <span style={{ fontSize:12, color:C.muted }}>{l}</span>
+                <span style={{ fontSize:12, fontWeight:600, color:l==="VL Balance"?C.blue:l==="SL Balance"?C.cyan:C.navy }}>{v}</span>
+              </div>
+            ))}
+          </div>
         </div>
-      </Card>
-      {photoModal && <PhotoUpload currentUrl={c.photoUrl} onSave={savePhoto} onClose={()=>setPhotoModal(false)}/>}
-      {chPw && <ChangePwModal user={contractor} onClose={()=>setChPw(false)}/>}
+
+        {/* ── RIGHT PANEL ── */}
+        <div>
+
+          {/* Work Information */}
+          <SectionCard icon="💼" title="Work Information" action={<LockBadge/>}>
+            <div style={{ padding:"4px 18px 14px" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 20px" }}>
+                {[
+                  ["Full Name",        c.name],
+                  ["Work Email",       c.email],
+                  ["Position",         c.position],
+                  ["Supervisor",       c.supervisor||"Not set"],
+                  ["Client Account",   c.client],
+                  ["Start Date",       c.startDate],
+                  ["Service Tier",     c.tier ? c.tier + (tiers[c.tier]?" — "+tiers[c.tier]:"") : "—"],
+                  ["Status",           c.status],
+                ].map(([l,v])=>(
+                  <div key={l} style={fieldStyle}>
+                    <div style={labelStyle}>{l}</div>
+                    <div style={{...valStyle, color:l==="Status"?(c.status==="Active"?C.green:C.muted):C.navy}}>{v||"—"}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop:12, padding:"8px 12px", background:C.off, borderRadius:8, fontSize:11, color:C.muted }}>
+                ℹ️ To update work info, contact your admin or <b>hr@elitegrid.co</b>
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* Personal Information */}
+          <SectionCard icon="👤" title="Personal Information"
+            action={<button onClick={openPersonal} style={{ fontSize:11, color:C.blue, border:`0.5px solid ${C.blue}`, background:"transparent", borderRadius:6, padding:"3px 10px", cursor:"pointer", fontFamily:"inherit" }}>Edit</button>}>
+            <div style={{ padding:"4px 18px 14px" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 20px" }}>
+                <div style={fieldStyle}>
+                  <div style={labelStyle}>Date of Birth</div>
+                  <div style={valStyle}>{c.dob||<span style={mutedVal}>Not set</span>}</div>
+                </div>
+                <div style={fieldStyle}>
+                  <div style={labelStyle}>Personal Gmail</div>
+                  <div style={valStyle}>{c.personalGmail||<span style={mutedVal}>Not set</span>}</div>
+                </div>
+                <div style={{ ...fieldStyle, gridColumn:"1/-1", borderBottom:"none" }}>
+                  <div style={labelStyle}>Address</div>
+                  <div style={valStyle}>{fullAddr||<span style={mutedVal}>Not set</span>}</div>
+                </div>
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* Payment Information */}
+          <SectionCard icon="🏦" title="Payment Information"
+            action={<span style={{ fontSize:11, color:C.muted }}>🔒 Submit once — contact HR to update</span>}>
+            <div style={{ padding:"14px 18px" }}>
+              {bankInfo.bankName ? (
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                    <div style={{ width:38, height:38, borderRadius:10, background:"#DBEAFE", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>🏦</div>
+                    <div>
+                      <div style={{ fontSize:14, fontWeight:700, color:C.navy }}>{bankInfo.bankName}</div>
+                      <div style={{ fontSize:12, color:C.muted }}>••••  ••••  {(bankInfo.accountNumber||"").slice(-4)}</div>
+                    </div>
+                  </div>
+                  <span style={{ fontSize:11, fontWeight:700, background:C.greenBg, color:C.green, padding:"3px 10px", borderRadius:20 }}>{bankInfo.payoutMethod||"—"}</span>
+                </div>
+              ) : (
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                  <span style={{ fontSize:13, color:C.muted, fontStyle:"italic" }}>No payment info on file</span>
+                  <button onClick={openBank} style={{ background:`linear-gradient(135deg,${C.blue},${C.blueDk})`, color:"#fff", border:"none", borderRadius:20, padding:"8px 18px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+                    + Add Payment Info
+                  </button>
+                </div>
+              )}
+            </div>
+          </SectionCard>
+
+        </div>
+      </div>
+
+      {/* Documents section below the grid */}
       <ContractorDocs contractor={c} user={{name:"",_username:c.username}} canManage={false}/>
+
+      {/* ── MODALS ── */}
+      {photoModal && <PhotoUpload currentUrl={c.photoUrl} username={c.username} onSave={savePhoto} onClose={()=>setPhotoModal(false)}/>}
+      {chPw && <ChangePwModal user={contractor} onClose={()=>setChPw(false)}/>}
+
+      {/* Personal info edit modal */}
+      {editPersonal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(27,42,74,0.65)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, padding:16 }} onClick={e=>e.target===e.currentTarget&&setEditPersonal(false)}>
+          <div style={{ background:"#fff", borderRadius:16, padding:32, width:"100%", maxWidth:500, boxShadow:"0 24px 80px rgba(0,0,0,0.3)", maxHeight:"90vh", overflowY:"auto" }}>
+            <div style={{ fontSize:18, fontWeight:800, color:C.navy, marginBottom:20 }}>Edit Personal Information</div>
+            {personalErr && <Alert type="error">{personalErr}</Alert>}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:14 }}>
+              <div style={{ gridColumn:"1/-1" }}>
+                <FieldLabel>Date of Birth</FieldLabel>
+                <FieldInput type="date" value={personalForm.dob||""} onChange={e=>sp("dob",e.target.value)}/>
+              </div>
+              <div style={{ gridColumn:"1/-1" }}>
+                <FieldLabel>Personal Gmail</FieldLabel>
+                <FieldInput value={personalForm.personalGmail||""} onChange={e=>sp("personalGmail",e.target.value)} placeholder="yourname@gmail.com"/>
+              </div>
+              <div style={{ gridColumn:"1/-1" }}>
+                <FieldLabel>Street Address</FieldLabel>
+                <FieldInput value={personalForm.addrStreet||""} onChange={e=>sp("addrStreet",e.target.value)} placeholder="e.g. 123 Rizal Street"/>
+              </div>
+              <div>
+                <FieldLabel>City</FieldLabel>
+                <FieldInput value={personalForm.addrCity||""} onChange={e=>sp("addrCity",e.target.value)} placeholder="e.g. Quezon City"/>
+              </div>
+              <div>
+                <FieldLabel>Province / State</FieldLabel>
+                <FieldInput value={personalForm.addrProvince||""} onChange={e=>sp("addrProvince",e.target.value)} placeholder="e.g. Metro Manila"/>
+              </div>
+              <div>
+                <FieldLabel>Country</FieldLabel>
+                <FieldInput value={personalForm.addrCountry||""} onChange={e=>sp("addrCountry",e.target.value)} placeholder="e.g. Philippines"/>
+              </div>
+              <div>
+                <FieldLabel>ZIP / Postal Code</FieldLabel>
+                <FieldInput value={personalForm.addrZip||""} onChange={e=>sp("addrZip",e.target.value)} placeholder="e.g. 1100"/>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <Btn onClick={savePersonal} disabled={savingPersonal} style={{ flex:1, padding:11 }}>{savingPersonal?"Saving...":"Save Changes"}</Btn>
+              <Btn variant="secondary" onClick={()=>setEditPersonal(false)} style={{ flex:1, padding:11 }}>Cancel</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bank info modal */}
+      {bankModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(27,42,74,0.65)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, padding:16 }} onClick={e=>e.target===e.currentTarget&&setBankModal(false)}>
+          <div style={{ background:"#fff", borderRadius:16, padding:32, width:"100%", maxWidth:480, boxShadow:"0 24px 80px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize:18, fontWeight:800, color:C.navy, marginBottom:6 }}>Payment Information</div>
+            <div style={{ fontSize:13, color:C.muted, marginBottom:20, lineHeight:1.5 }}>This information is used for payroll processing. Only you can update it.</div>
+            {bankErr && <Alert type="error">{bankErr}</Alert>}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+              <div style={{ gridColumn:"1/-1" }}>
+                <FieldLabel required>Bank Name</FieldLabel>
+                <select value={bankForm._bankPreset||""} onChange={e=>{
+                  const v = e.target.value;
+                  sb("_bankPreset", v);
+                  if (v !== "__manual__") sb("bankName", v);
+                  else sb("bankName", "");
+                }} style={{ width:"100%", padding:"10px 13px", borderRadius:10, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", background:"#fff", marginBottom:8 }}>
+                  <option value="">Select a bank...</option>
+                  {["BDO Unibank","Bank of the Philippine Islands (BPI)","Metrobank","Land Bank of the Philippines","Development Bank of the Philippines (DBP)","Philippine National Bank (PNB)","Security Bank","China Banking Corporation (Chinabank)","RCBC (Rizal Commercial Banking Corporation)","EastWest Bank","UnionBank of the Philippines","PSBank (Philippine Savings Bank)","Maybank Philippines","Citibank Philippines","HSBC Philippines","Standard Chartered Philippines","Bank of Commerce","Asia United Bank (AUB)","Philippine Bank of Communications (PBCom)","Sterling Bank of Asia","Robinsons Bank","CTBC Bank Philippines","PBB (Philippine Business Bank)","Producers Savings Bank","Wealth Development Bank","AllBank","Enterprise Bank","Dungganon Bank","1st Valley Bank","Rural Bank of Batangas","GCash (G-Xchange Inc.)","PayMaya / Maya Bank","Tonik Digital Bank","GoTyme Bank","SeaBank Philippines","OFBank (Overseas Filipino Bank)","CIMB Bank Philippines","ING Bank Philippines","SB Finance","BPI Direct BanKo"].map(b=>(
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                  <option value="__manual__">Other (type manually)</option>
+                </select>
+                {(bankForm._bankPreset === "__manual__" || (bankForm.bankName && !["BDO Unibank","Bank of the Philippine Islands (BPI)","Metrobank","Land Bank of the Philippines","Development Bank of the Philippines (DBP)","Philippine National Bank (PNB)","Security Bank","China Banking Corporation (Chinabank)","RCBC (Rizal Commercial Banking Corporation)","EastWest Bank","UnionBank of the Philippines","PSBank (Philippine Savings Bank)","Maybank Philippines","Citibank Philippines","HSBC Philippines","Standard Chartered Philippines","Bank of Commerce","Asia United Bank (AUB)","Philippine Bank of Communications (PBCom)","Sterling Bank of Asia","Robinsons Bank","CTBC Bank Philippines","PBB (Philippine Business Bank)","Producers Savings Bank","Wealth Development Bank","AllBank","Enterprise Bank","Dungganon Bank","1st Valley Bank","Rural Bank of Batangas","GCash (G-Xchange Inc.)","PayMaya / Maya Bank","Tonik Digital Bank","GoTyme Bank","SeaBank Philippines","OFBank (Overseas Filipino Bank)","CIMB Bank Philippines","ING Bank Philippines","SB Finance","BPI Direct BanKo"].includes(bankForm.bankName))) && (
+                  <FieldInput value={bankForm.bankName||""} onChange={e=>sb("bankName",e.target.value)} placeholder="Enter bank name manually"/>
+                )}
+              </div>
+              <div>
+                <FieldLabel required>Account Number</FieldLabel>
+                <FieldInput value={bankForm.accountNumber||""} onChange={e=>sb("accountNumber",e.target.value)} placeholder="Account number"/>
+              </div>
+              <div>
+                <FieldLabel>SWIFT / BIC Code</FieldLabel>
+                <FieldInput value={bankForm.swiftCode||""} onChange={e=>sb("swiftCode",e.target.value)} placeholder="Optional"/>
+              </div>
+              <div>
+                <FieldLabel>Wise Email Address</FieldLabel>
+                <FieldInput value={bankForm.wiseEmail||""} onChange={e=>sb("wiseEmail",e.target.value)} placeholder="email@domain.com"/>
+              </div>
+              <div>
+                <FieldLabel required>Preferred Payout Method</FieldLabel>
+                <select value={bankForm.payoutMethod||"Wise"} onChange={e=>sb("payoutMethod",e.target.value)}
+                  style={{ width:"100%", padding:"10px 13px", borderRadius:10, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", background:"#fff" }}>
+                  <option value="Wise">Wise</option>
+                  <option value="Bank Transfer">Bank Transfer</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:10, marginTop:20 }}>
+              <Btn onClick={saveBank} disabled={savingBank} style={{ flex:1, padding:11 }}>{savingBank?"Saving...":"Save Payment Info"}</Btn>
+              <Btn variant="secondary" onClick={()=>setBankModal(false)} style={{ flex:1, padding:11 }}>Cancel</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function CPayslips({ user }) {
   const [sel,setSel] = useState(null);
-  // Filter case-insensitively, try both username and _username
   const myUsername = (user.username||user._username||"").toLowerCase();
   const payslips = (user._payslips||[]).filter(p=>
     !p.username || p.username.toLowerCase()===myUsername
   );
+
+  // Recalculate net from components — fixes cases where stored net didn't include allowance
+  const calcDisplayNet = (p) => {
+    const toN = (v) => { if (!v) return 0; const n=parseFloat(String(v).replace(/[^0-9.-]/g,"")); return isNaN(n)?0:n; };
+    // Allowance is always a positive addition to gross; force absolute value
+    const computed = toN(p.gross) + Math.abs(toN(p.allowance)) - Math.abs(toN(p.deductions)) + toN(p.adjustments);
+    const stored   = toN(p.net);
+    // If the stored net is clearly wrong (doesn't match computed within $0.01), show computed
+    return Math.abs(computed - stored) > 0.02 ? computed : stored;
+  };
   return (
     <div style={{ padding:"28px 20px", maxWidth:860, margin:"0 auto" }}>
       <div style={{ fontSize:20, fontWeight:800, marginBottom:20 }}>Payslip Records</div>
@@ -1093,9 +1502,9 @@ function CPayslips({ user }) {
                     <td style={{ padding:"12px 14px", fontSize:14 }}>{fmtCur(p.allowance)}</td>
                     <td style={{ padding:"12px 14px", fontSize:14 }}>{fmtCur(p.deductions)}</td>
                     <td style={{ padding:"12px 14px", fontSize:14 }}>{fmtCur(p.adjustments)}</td>
-                    <td style={{ padding:"12px 14px", fontSize:14, fontWeight:700 }}>{fmtCur(p.net)}</td>
+                    <td style={{ padding:"12px 14px", fontSize:14, fontWeight:700, color:C.blue }}>{fmtCur(calcDisplayNet(p))}</td>
                     <td style={{ padding:"12px 14px" }}><SBadge s={p.status}/></td>
-                    <td style={{ padding:"12px 14px", fontSize:13, color:C.muted }}>{p.released}</td>
+                    <td style={{ padding:"12px 14px", fontSize:13, color:C.muted }}>{fmtRelease(p.released)}</td>
                     <td style={{ padding:"12px 14px" }}>
                       <button onClick={()=>setSel(p)} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:7, padding:"5px 12px", fontSize:12, color:C.blue, fontWeight:600, cursor:"pointer" }}>View</button>
                     </td>
@@ -1117,14 +1526,14 @@ function CPayslips({ user }) {
               <div style={{ background:C.navy, padding:"6px 14px", borderRadius:8, fontSize:10, color:C.cyan, fontWeight:700, letterSpacing:1 }}>ELITE GRID</div>
             </div>
             <div style={{ background:C.off, borderRadius:10, padding:16, marginBottom:18 }}>
-              {[["Gross Pay",fmtCur(sel.gross),C.navy],["Allowance",fmtCur(sel.allowance),C.navy],["Deductions",fmtCur(sel.deductions),C.navy],["Adjustments",fmtCur(sel.adjustments),C.navy],["Net Pay",fmtCur(sel.net),C.navy]].map(([l,v,col]) => (
+              {[["Gross Pay",fmtCur(sel.gross)],["Allowance",fmtCur(sel.allowance)],["Deductions",fmtCur(sel.deductions)],["Adjustments",fmtCur(sel.adjustments)],["Net Pay",fmtCur(calcDisplayNet(sel))]].map(([l,v]) => (
                 <div key={l} style={{ display:"flex", justifyContent:"space-between", padding:"9px 0", borderBottom:l!=="Net Pay"?`1px solid ${C.border}`:"none" }}>
                   <span style={{ fontSize:14, color:l==="Net Pay"?C.navy:C.muted, fontWeight:l==="Net Pay"?700:400 }}>{l}</span>
-                  <span style={{ fontSize:l==="Net Pay"?18:15, fontWeight:700, color:col }}>{v}</span>
+                  <span style={{ fontSize:l==="Net Pay"?18:15, fontWeight:700, color:l==="Net Pay"?C.blue:C.navy }}>{v}</span>
                 </div>
               ))}
             </div>
-            <div style={{ fontSize:12, color:C.muted, marginBottom:20 }}>Released: <b>{sel.released}</b></div>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:20 }}>Released: <b>{fmtRelease(sel.released)}</b></div>
             <Btn onClick={()=>setSel(null)} style={{ width:"100%", padding:12 }}>Close</Btn>
           </div>
         </div>
@@ -1133,15 +1542,85 @@ function CPayslips({ user }) {
   );
 }
 
-function CPTOPage({ contractor, setPage }) {
+function CPTOPage({ contractor, setPage, leaves, ptoHistory }) {
   const c = contractor;
+  const [histModal, setHistModal] = useState(null); // "VL" or "SL"
+
   const vlBal = Math.max(0,parseFloat((c.vlAccrued-c.vlUsed-c.vlPending).toFixed(2)));
   const slBal = Math.max(0,parseFloat((c.slTotal-c.slUsed-c.slPending).toFixed(2)));
   const atCap = parseFloat(c.vlAccrued)>=200;
   const items = [
-    { label:"Vacation Leave (VL)", note:"Accrues monthly - max 200 hrs (25 days)", total:c.vlTotal, used:c.vlUsed, pending:c.vlPending, balance:vlBal, color:C.blue, atCap },
-    { label:"Sick Leave (SL)",     note:"Annual lump sum - resets Jan 1",           total:c.slTotal, used:c.slUsed, pending:c.slPending, balance:slBal, color:C.cyan, atCap:false },
+    { key:"VL", label:"Vacation Leave (VL)", note:"Accrues monthly - max 200 hrs (25 days)", total:c.vlTotal, used:c.vlUsed, pending:c.vlPending, balance:vlBal, color:C.blue, atCap },
+    { key:"SL", label:"Sick Leave (SL)",     note:"Annual lump sum - resets Jan 1",           total:c.slTotal, used:c.slUsed, pending:c.slPending, balance:slBal, color:C.cyan, atCap:false },
   ];
+
+  // Build PTO timeline for the modal
+  const buildTimeline = (type) => {
+    const events = [];
+    const monthlyRate = parseFloat(c.vlMonthlyRate)||13.33;
+    const isVL = type === "VL";
+
+    // Starting point — VL starts at 0 on hire and accrues; SL starts at full lump sum
+    if (c.startDate) {
+      const start = new Date(c.startDate);
+      if (!isNaN(start.getTime())) {
+        const initHrs = isVL ? 0 : (parseFloat(c.slTotal)||40);
+        events.push({ date:c.startDate, label:"Hired — "+(isVL?"VL starts at 0, accrues monthly":"SL initial allocation"), change:isVL?"0 hrs":"+"+initHrs+" hrs", type:"hire", _balance:initHrs });
+
+        if (isVL) {
+          // Generate monthly accruals from start date up to today
+          const today = new Date();
+          let cur = new Date(start);
+          cur.setMonth(cur.getMonth()+1);
+          cur.setDate(1);
+          let running = 0;
+          while (cur <= today) {
+            const mon = cur.toLocaleDateString("en-US",{month:"short",year:"numeric"});
+            running = Math.min(200, parseFloat((running+monthlyRate).toFixed(2)));
+            events.push({ date:cur.toISOString().substring(0,10), label:"Monthly accrual — "+mon, change:"+"+monthlyRate+" hrs", type:"accrual", _balance:running });
+            cur.setMonth(cur.getMonth()+1);
+          }
+        }
+      }
+    }
+
+    // Leave deductions (approved only)
+    (leaves||[]).filter(l=>l.leaveType===type&&l.status==="Approved").forEach(l=>{
+      const hrs = parseFloat(l.hours)||0;
+      events.push({ date:String(l.start).substring(0,10), label:"Leave taken"+(l.isHalfDay?" (half day)":"")+(l.reason?" — "+l.reason:""), change:"-"+hrs+" hrs", type:"leave", _hrs:-hrs });
+    });
+
+    // HR adjustments from audit log
+    (ptoHistory||[]).filter(e=>{
+      const f = e.field||"";
+      return isVL ? f.startsWith("vl") : f.startsWith("sl");
+    }).forEach(e=>{
+      const oldV = parseFloat(e.oldVal)||0;
+      const newV = parseFloat(e.newVal)||0;
+      const diff = newV - oldV;
+      const sign = diff>=0?"+":"";
+      events.push({ date:e.timestamp, label:"HR adjustment"+(e.reason?" — "+e.reason:"")+" ("+e.field+")", change:sign+diff.toFixed(2)+" hrs", type:"adjust", _balance:newV });
+    });
+
+    // Sort chronologically (oldest first) to compute running balance
+    events.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+
+    // Thread running balance through all events
+    let running = 0;
+    events.forEach(e => {
+      if (e._balance !== undefined) {
+        running = e._balance; // hire/accrual/adjust set the balance directly
+      } else if (e._hrs !== undefined) {
+        running = Math.max(0, parseFloat((running + e._hrs).toFixed(2)));
+      }
+      e.balance = running;
+    });
+
+    // Now reverse so newest is first
+    events.reverse();
+    return events;
+  };
+
   return (
     <div style={{ padding:"28px 20px", maxWidth:700, margin:"0 auto" }}>
       <div style={{ fontSize:20, fontWeight:800, marginBottom:20 }}>PTO & Leave Balances</div>
@@ -1150,7 +1629,8 @@ function CPTOPage({ contractor, setPage }) {
           const uP = Math.min((p.used/p.total)*100,100);
           const pP = Math.min((p.pending/p.total)*100,100-uP);
           return (
-            <div key={p.label} style={{ background:"#fff", borderRadius:12, padding:22, border:`1px solid ${C.border}`, borderLeft:`4px solid ${p.color}` }}>
+            <div key={p.label} onClick={()=>setHistModal(p.key)} className="card-lift"
+              style={{ background:"#fff", borderRadius:12, padding:22, border:`1px solid ${C.border}`, borderLeft:`4px solid ${p.color}`, cursor:"pointer" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14 }}>
                 <div>
                   <div style={{ fontWeight:700, fontSize:15, color:C.navy }}>{p.label}</div>
@@ -1171,6 +1651,7 @@ function CPTOPage({ contractor, setPage }) {
                 {p.pending>0 && <span>Pending: <b style={{ color:C.amber }}>{p.pending} hrs</b></span>}
                 <span>Total: <b style={{ color:C.navy }}>{p.total} hrs</b></span>
               </div>
+              <div style={{ marginTop:10, fontSize:11, color:p.color, fontWeight:600 }}>📋 Click to view history</div>
             </div>
           );
         })}
@@ -1180,6 +1661,71 @@ function CPTOPage({ contractor, setPage }) {
         <div style={{ fontSize:13, color:"#8AAABF", marginBottom:16, lineHeight:1.5 }}>VL must be filed before your leave date. SL can be filed same day or retroactively. Half day = 4 hrs.</div>
         <button onClick={()=>setPage("c-leave")} style={{ background:C.cyan, color:C.navy, padding:"9px 20px", borderRadius:8, fontWeight:700, fontSize:13, border:"none", cursor:"pointer" }}>File a Request</button>
       </div>
+
+      {/* PTO History Modal */}
+      {histModal && (()=>{
+        const isVL = histModal==="VL";
+        const color = isVL ? C.blue : C.cyan;
+        const timeline = buildTimeline(histModal);
+        return (
+          <div style={{ position:"fixed", inset:0, background:"rgba(27,42,74,0.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, padding:16 }} onClick={e=>e.target===e.currentTarget&&setHistModal(null)}>
+            <div style={{ background:"#fff", borderRadius:16, width:"100%", maxWidth:620, maxHeight:"85vh", display:"flex", flexDirection:"column", boxShadow:"0 24px 80px rgba(0,0,0,0.3)", overflow:"hidden" }}>
+              {/* Header */}
+              <div style={{ background:`linear-gradient(135deg,${C.navy},${C.blueDk})`, padding:"20px 24px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div>
+                  <div style={{ fontSize:16, fontWeight:800, color:"#fff" }}>{isVL?"Vacation Leave (VL)":"Sick Leave (SL)"} History</div>
+                  <div style={{ fontSize:12, color:"#8AAABF", marginTop:2 }}>{c.name} · Current balance: <b style={{ color:isVL?C.cyan:"#fff" }}>{isVL?vlBal:slBal} hrs</b></div>
+                </div>
+                <button onClick={()=>setHistModal(null)} style={{ background:"rgba(255,255,255,0.1)", border:"none", borderRadius:8, padding:"6px 12px", color:"#fff", cursor:"pointer", fontSize:20, lineHeight:1 }}>×</button>
+              </div>
+              {/* Timeline */}
+              <div style={{ overflowY:"auto", flex:1, padding:"0 0 8px" }}>
+                {timeline.length===0
+                  ? <div style={{ padding:32, textAlign:"center", color:C.muted, fontSize:14 }}>No history available yet.</div>
+                  : (
+                    <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                      <thead style={{ position:"sticky", top:0, background:"#F7F9FB", zIndex:1 }}>
+                        <tr>
+                          {["Date","Event","Change","Balance"].map(h=>(
+                            <th key={h} style={{ padding:"10px 16px", textAlign:"left", fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.5px", borderBottom:`1px solid ${C.border}` }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {timeline.map((e,i)=>{
+                          const isPos = String(e.change).startsWith("+");
+                          const isNeg = String(e.change).startsWith("-");
+                          const typeIcon = e.type==="hire"?"🎉":e.type==="accrual"?"📈":e.type==="leave"?"🌴":e.type==="adjust"?"⚙️":"•";
+                          return (
+                            <tr key={i} className="tr-hover" style={{ borderBottom:`1px solid ${C.border}` }}>
+                              <td style={{ padding:"11px 16px", fontSize:12, color:C.muted, whiteSpace:"nowrap" }}>{fmtRelease(e.date)}</td>
+                              <td style={{ padding:"11px 16px", fontSize:13 }}>
+                                <span style={{ marginRight:6 }}>{typeIcon}</span>
+                                {e.label}
+                              </td>
+                              <td style={{ padding:"11px 16px", fontSize:13, fontWeight:700, color:isPos?C.green:isNeg?C.red:C.muted, whiteSpace:"nowrap" }}>{e.change}</td>
+                              <td style={{ padding:"11px 16px", fontSize:13, fontWeight:600, color:e.balance!==null?C.navy:C.muted }}>
+                                {e.balance!==null ? e.balance+" hrs" : "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )
+                }
+              </div>
+              {/* Footer legend */}
+              <div style={{ padding:"12px 24px", borderTop:`1px solid ${C.border}`, display:"flex", gap:16, flexWrap:"wrap", fontSize:11, color:C.muted }}>
+                <span>🎉 Hire date</span>
+                <span>📈 Monthly accrual</span>
+                <span>🌴 Leave taken</span>
+                <span>⚙️ HR adjustment</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1659,6 +2205,7 @@ function AOverview({ user, contractors, leaves, perms, setPage, announcements })
 function ATeam({ user, contractors, setContractors, perms, rateHistory, setRateHistory }) {
   const [showAdd,    setShowAdd]    = useState(false);
   const [editTarget, setEditTarget] = useState(null);
+  const [viewTarget, setViewTarget] = useState(null);
   const [search,     setSearch]     = useState("");
   const [filterSt,   setFilterSt]   = useState("Active");
 
@@ -1702,12 +2249,13 @@ function ATeam({ user, contractors, setContractors, perms, rateHistory, setRateH
                       </div>
                     </td>
                     <td style={{ padding:"12px 14px" }}>
-                      <div style={{ fontWeight:600, fontSize:14, color:C.navy }}>{c.name}</div>
+                      <div style={{ fontWeight:600, fontSize:14, color:C.blue, cursor:"pointer", textDecoration:"underline", textDecorationStyle:"dotted", textUnderlineOffset:3 }}
+                        onClick={()=>setViewTarget(c)}>{c.name}</div>
                       <div style={{ fontSize:12, color:C.muted }}>@{c.username} - {c.position}</div>
                     </td>
                     <td style={{ padding:"12px 14px" }}><span style={{ background:"#DBEAFE", color:"#1D4ED8", fontSize:11, fontWeight:700, padding:"3px 9px", borderRadius:20 }}>{c.client}</span></td>
                     <td style={{ padding:"12px 14px", fontSize:13 }}>{c.tier}</td>
-                    <td style={{ padding:"12px 14px", fontSize:13, fontWeight:600, color:C.blue }}>{c.rate}</td>
+                    <td style={{ padding:"12px 14px", fontSize:13, fontWeight:600, color:C.blue }}>{fmtRate(c.rate)}</td>
                     <td style={{ padding:"12px 14px" }}><SBadge s={c.status}/></td>
                     <td style={{ padding:"12px 14px" }}>
                       {user.role==="superadmin"
@@ -1760,6 +2308,164 @@ function ATeam({ user, contractors, setContractors, perms, rateHistory, setRateH
         }
         setContractors(p=>p.map(x=>x.username===c.username?c:x)); setEditTarget(null);
       }} mode="edit" existing={editTarget} rateHistory={rateHistory}/>}
+
+      {/* Admin contractor profile view modal — mirrors CProfile layout */}
+      {viewTarget && (()=>{
+        const vt = viewTarget;
+        const vtInitials = vt.name ? vt.name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
+        const vtVLBal = Math.max(0, parseFloat(((vt.vlAccrued||0)-(vt.vlUsed||0)-(vt.vlPending||0)).toFixed(2)));
+        const vtSLBal = Math.max(0, parseFloat(((vt.slTotal||0)-(vt.slUsed||0)-(vt.slPending||0)).toFixed(2)));
+        const vtTenure = (() => {
+          if (!vt.startDate) return "—";
+          const start = new Date(vt.startDate);
+          if (isNaN(start.getTime())) return vt.startDate;
+          const now = new Date();
+          let yrs = now.getFullYear()-start.getFullYear();
+          let mons = now.getMonth()-start.getMonth();
+          if (mons<0){yrs--;mons+=12;}
+          if (yrs===0) return mons+" mo";
+          return yrs+" yr"+(yrs!==1?"s":"")+(mons>0?" "+mons+" mo":"");
+        })();
+        const tiers = { LAUNCH:"Starter", ANCHOR:"Core Team", ELEVATE:"Senior/Specialist" };
+        const fullAddr = [vt.addrStreet,vt.addrCity,vt.addrProvince,vt.addrCountry,vt.addrZip].filter(Boolean).join(", ");
+        const fieldStyle2 = { padding:"10px 0", borderBottom:`1px solid ${C.border}` };
+        const labelStyle2 = { fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.6px", marginBottom:3 };
+        const valStyle2   = { fontSize:14, fontWeight:500, color:C.navy };
+
+        return (
+          <div style={{ position:"fixed", inset:0, background:"rgba(27,42,74,0.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, padding:16 }} onClick={e=>e.target===e.currentTarget&&setViewTarget(null)}>
+            <div style={{ background:"#F7F9FB", borderRadius:16, width:"100%", maxWidth:860, maxHeight:"92vh", overflowY:"auto", boxShadow:"0 24px 80px rgba(0,0,0,0.3)" }}>
+
+              {/* Modal top bar */}
+              <div style={{ background:`linear-gradient(135deg,${C.navy},${C.blueDk})`, padding:"16px 24px", display:"flex", justifyContent:"space-between", alignItems:"center", borderRadius:"16px 16px 0 0" }}>
+                <div style={{ fontSize:16, fontWeight:800, color:"#fff" }}>Contractor Profile</div>
+                <div style={{ display:"flex", gap:10 }}>
+                  <Btn onClick={()=>{ setEditTarget(vt); setViewTarget(null); }} style={{ padding:"7px 16px", fontSize:13 }}>Edit Profile</Btn>
+                  <button onClick={()=>setViewTarget(null)} style={{ background:"rgba(255,255,255,0.15)", border:"none", borderRadius:8, padding:"6px 14px", color:"#fff", cursor:"pointer", fontSize:18, lineHeight:1 }}>×</button>
+                </div>
+              </div>
+
+              <div style={{ padding:"20px", display:"grid", gridTemplateColumns:"200px 1fr", gap:16, alignItems:"start" }}>
+
+                {/* Left panel */}
+                <div>
+                  <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${C.border}`, padding:18, textAlign:"center", marginBottom:14 }}>
+                    {vt.photoUrl
+                      ? <img src={vt.photoUrl} alt={vt.name} style={{ width:76, height:76, borderRadius:"50%", objectFit:"cover", border:`3px solid ${C.cyan}`, marginBottom:10 }} onError={e=>{e.target.style.display="none";}}/>
+                      : <div style={{ width:76, height:76, borderRadius:"50%", background:`linear-gradient(135deg,${C.cyan},${C.blueDk})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, fontWeight:800, color:"#fff", margin:"0 auto 10px" }}>{vtInitials}</div>
+                    }
+                    <div style={{ fontSize:15, fontWeight:800, color:C.navy, marginBottom:2 }}>{vt.name}</div>
+                    <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>{vt.position}</div>
+                    <div style={{ display:"flex", gap:5, justifyContent:"center", flexWrap:"wrap" }}>
+                      {vt.client && <span style={{ fontSize:10, fontWeight:700, background:"#DBEAFE", color:"#1D4ED8", padding:"2px 8px", borderRadius:20 }}>{vt.client}</span>}
+                      {vt.tier   && <span style={{ fontSize:10, fontWeight:700, background:"#DCFCE7", color:"#166534", padding:"2px 8px", borderRadius:20 }}>{vt.tier}</span>}
+                      {vt.status && <span style={{ fontSize:10, fontWeight:700, background:vt.status==="Active"?C.greenBg:C.off, color:vt.status==="Active"?C.green:C.muted, padding:"2px 8px", borderRadius:20 }}>{vt.status}</span>}
+                    </div>
+                  </div>
+
+                  {/* Quick stats */}
+                  <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${C.border}`, padding:"14px 16px" }}>
+                    <div style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.6px", marginBottom:10 }}>Quick Stats</div>
+                    {[
+                      ["Tenure",       vtTenure],
+                      ["Contract",     vt.contractType||"—"],
+                      ["Rate",         fmtRate(vt.rate)],
+                      ["VL Balance",   vtVLBal+" hrs"],
+                      ["VL Used",      (vt.vlUsed||0)+" hrs"],
+                      ["SL Balance",   vtSLBal+" hrs"],
+                      ["SL Used",      (vt.slUsed||0)+" hrs"],
+                    ].map(([l,v])=>(
+                      <div key={l} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"5px 0", borderBottom:`1px solid ${C.border}` }}>
+                        <span style={{ fontSize:11, color:C.muted }}>{l}</span>
+                        <span style={{ fontSize:11, fontWeight:700, color:l.includes("VL")&&l==="VL Balance"?C.blue:l.includes("SL")&&l==="SL Balance"?C.cyan:C.navy }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Right panel */}
+                <div>
+
+                  {/* Work Information */}
+                  <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${C.border}`, marginBottom:14, overflow:"hidden" }}>
+                    <div style={{ padding:"12px 18px 8px", borderBottom:`1px solid ${C.border}`, fontSize:12, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.6px" }}>💼 Work Information</div>
+                    <div style={{ padding:"4px 18px 14px" }}>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 20px" }}>
+                        {[
+                          ["Full Name",     vt.name],
+                          ["Work Email",    vt.email],
+                          ["Position",      vt.position],
+                          ["Supervisor",    vt.supervisor||"Not set"],
+                          ["Client",        vt.client],
+                          ["Start Date",    vt.startDate],
+                          ["Service Tier",  vt.tier+(tiers[vt.tier]?" — "+tiers[vt.tier]:"")],
+                          ["Contract Type", vt.contractType||"Not set"],
+                          ["Status",        vt.status],
+                          ["Role",          vt.role],
+                        ].map(([l,v])=>(
+                          <div key={l} style={fieldStyle2}>
+                            <div style={labelStyle2}>{l}</div>
+                            <div style={{...valStyle2, color:l==="Status"?(vt.status==="Active"?C.green:C.muted):C.navy}}>{v||"—"}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Personal Information */}
+                  <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${C.border}`, marginBottom:14, overflow:"hidden" }}>
+                    <div style={{ padding:"12px 18px 8px", borderBottom:`1px solid ${C.border}`, fontSize:12, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.6px" }}>👤 Personal Information</div>
+                    <div style={{ padding:"4px 18px 14px" }}>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 20px" }}>
+                        <div style={fieldStyle2}>
+                          <div style={labelStyle2}>Date of Birth</div>
+                          <div style={valStyle2}>{vt.dob||<span style={{ color:C.muted, fontStyle:"italic" }}>Not set</span>}</div>
+                        </div>
+                        <div style={fieldStyle2}>
+                          <div style={labelStyle2}>Personal Gmail</div>
+                          <div style={valStyle2}>{vt.personalGmail||<span style={{ color:C.muted, fontStyle:"italic" }}>Not set</span>}</div>
+                        </div>
+                        <div style={{ ...fieldStyle2, gridColumn:"1/-1", borderBottom:"none" }}>
+                          <div style={labelStyle2}>Address</div>
+                          <div style={valStyle2}>{fullAddr||<span style={{ color:C.muted, fontStyle:"italic" }}>Not set</span>}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Payment Information — view only for admin */}
+                  <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${C.border}`, overflow:"hidden" }}>
+                    <div style={{ padding:"12px 18px 8px", borderBottom:`1px solid ${C.border}`, fontSize:12, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.6px" }}>🏦 Payment Information</div>
+                    <div style={{ padding:"14px 18px" }}>
+                      {vt._bankInfo && vt._bankInfo.bankName ? (
+                        <div>
+                          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 20px" }}>
+                            {[
+                              ["Bank Name",    vt._bankInfo.bankName],
+                              ["Account",      "••••  ••••  "+(vt._bankInfo.accountNumber||"").slice(-4)],
+                              ["SWIFT/BIC",    vt._bankInfo.swiftCode||"—"],
+                              ["Wise Email",   vt._bankInfo.wiseEmail||"—"],
+                              ["Payout Method",vt._bankInfo.payoutMethod||"—"],
+                            ].map(([l,v])=>(
+                              <div key={l} style={fieldStyle2}>
+                                <div style={labelStyle2}>{l}</div>
+                                <div style={valStyle2}>{v}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize:13, color:C.muted, fontStyle:"italic" }}>No payment info on file — contractor has not submitted yet.</div>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1864,6 +2570,8 @@ function APayslips({ user, contractors, payslips, setPayslips, perms }) {
 
   const clientsInScope = ["All", ...new Set(visible.map(c=>c.client))];
 
+  const allPeriods = [...new Set(payslips.filter(p=>visUnames.has((p.username||"").toLowerCase())).map(p=>p.period).filter(Boolean))];
+
   // Filter payslips to only those in scope + apply search filters
   const filtered = payslips.filter(p => {
     if (!p.username) return false;
@@ -1967,8 +2675,11 @@ function APayslips({ user, contractors, payslips, setPayslips, perms }) {
           style={{ padding:"8px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", background:"#fff" }}>
           {clientsInScope.map(c=><option key={c} value={c}>{c}</option>)}
         </select>
-        <input value={filterPeriod} onChange={e=>setFilterPeriod(e.target.value)} placeholder="Filter by period..."
-          style={{ padding:"8px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", width:180 }}/>
+        <select value={filterPeriod} onChange={e=>setFilterPeriod(e.target.value)}
+          style={{ padding:"8px 13px", borderRadius:8, border:`1.5px solid ${C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", background:"#fff" }}>
+          <option value="">All Periods</option>
+          {allPeriods.map(p=><option key={p} value={p}>{p}</option>)}
+        </select>
         {(searchName||filterClient!=="All"||filterPeriod) &&
           <button onClick={()=>{ setSearchName(""); setFilterClient("All"); setFilterPeriod(""); }}
             style={{ padding:"8px 12px", borderRadius:8, border:`1px solid ${C.border}`, background:"#fff", color:C.muted, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
@@ -2007,7 +2718,7 @@ function APayslips({ user, contractors, payslips, setPayslips, perms }) {
                         <td style={{ padding:"11px 14px", fontSize:13 }}>{fmtCur(p.adjustments)}</td>
                         <td style={{ padding:"11px 14px", fontSize:13, fontWeight:700 }}>{fmtCur(p.net)}</td>
                         <td style={{ padding:"11px 14px" }}><SBadge s={p.status}/></td>
-                        <td style={{ padding:"11px 14px", fontSize:12, color:C.muted }}>{p.released}</td>
+                        <td style={{ padding:"11px 14px", fontSize:12, color:C.muted }}>{fmtRelease(p.released)}</td>
                       </tr>
                     );
                   })
@@ -2127,42 +2838,109 @@ function ALeaveCalendar({ leaves, contractors, perms, user }) {
 }
 
 
-// ── HR CALENDAR (Birthdays + Anniversaries) ──────────────────────────
+// ── HR CALENDAR (Birthdays + 6-Month Eval + Anniversaries) ──────────
 function AHRCalendar({ contractors }) {
   const today = nowPHT();
-  const todayStr = todayPHT();
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [viewYear,  setViewYear]  = useState(today.getFullYear());
+  const [filter,    setFilter]    = useState("all"); // all | birthday | eval | anniversary
 
-  // Get upcoming events in next 60 days
-  const getUpcoming = (days) => {
+  const EVENT_TYPES = {
+    birthday:    { icon:"🎂", label:"Birthday",          color:"#EC4899" },
+    eval:        { icon:"📋", label:"6-Month Evaluation", color:"#7C3AED" },
+    anniversary: { icon:"🏆", label:"Work Anniversary",   color:C.blue   },
+  };
+
+  const getEventsForMonth = (month, year) => {
     const events = [];
-    contractors.filter(c=>c.status==="Active").forEach(c => {
+    contractors.filter(c=>c.status==="Active"||!c.status).forEach(c => {
+
+      // ── Birthday ──
+      if (c.dob) {
+        const dob = new Date(c.dob);
+        if (!isNaN(dob.getTime()) && dob.getMonth()===month) {
+          events.push({ type:"birthday", name:c.name, client:c.client, day:dob.getDate(),
+            label:`Turning ${year - dob.getFullYear()}`, color:EVENT_TYPES.birthday.color });
+        }
+      }
+
+      // ── 6-Month Evaluation ──
+      if (c.startDate) {
+        const start = new Date(c.startDate);
+        if (!isNaN(start.getTime())) {
+          // Every 6 months from start date
+          let evalDate = new Date(start);
+          evalDate.setMonth(evalDate.getMonth() + 6);
+          while (evalDate.getFullYear() < year || (evalDate.getFullYear()===year && evalDate.getMonth() < month)) {
+            evalDate.setMonth(evalDate.getMonth() + 6);
+          }
+          if (evalDate.getMonth()===month && evalDate.getFullYear()===year) {
+            const months = Math.round((evalDate - start) / (1000*60*60*24*30.44));
+            events.push({ type:"eval", name:c.name, client:c.client, day:evalDate.getDate(),
+              label:`${months}-month eval`, color:EVENT_TYPES.eval.color });
+          }
+        }
+      }
+
+      // ── Work Anniversary ──
+      if (c.startDate) {
+        const start = new Date(c.startDate);
+        if (!isNaN(start.getTime()) && start.getMonth()===month) {
+          const years = year - start.getFullYear();
+          if (years > 0) {
+            events.push({ type:"anniversary", name:c.name, client:c.client, day:start.getDate(),
+              label:`${years} year${years!==1?"s":""}`, color:EVENT_TYPES.anniversary.color });
+          }
+        }
+      }
+    });
+    return events;
+  };
+
+  // Upcoming events (next 60 days from today)
+  const getUpcoming = () => {
+    const events = [];
+    contractors.filter(c=>c.status==="Active"||!c.status).forEach(c => {
+
       // Birthday
       if (c.dob) {
         const dob = new Date(c.dob);
         if (!isNaN(dob.getTime())) {
-          const thisYearBday = new Date(today.getFullYear(), dob.getMonth(), dob.getDate());
-          const nextYearBday = new Date(today.getFullYear()+1, dob.getMonth(), dob.getDate());
-          const bday = thisYearBday >= today ? thisYearBday : nextYearBday;
-          const diff = Math.ceil((bday - today) / 86400000);
-          if (diff <= days) {
-            const age = today.getFullYear() - dob.getFullYear() + (bday.getFullYear() > today.getFullYear() ? 1 : 0);
-            events.push({ type:"birthday", name:c.name, client:c.client, date:bday, diff, label:`🎂 Turning ${age}`, color:"#EC4899" });
+          const thisYr = new Date(today.getFullYear(), dob.getMonth(), dob.getDate());
+          const ev = thisYr >= today ? thisYr : new Date(today.getFullYear()+1, dob.getMonth(), dob.getDate());
+          const diff = Math.ceil((ev - today) / 86400000);
+          if (diff <= 60) {
+            const age = today.getFullYear() - dob.getFullYear() + (ev.getFullYear() > today.getFullYear() ? 1 : 0);
+            events.push({ type:"birthday", name:c.name, client:c.client, date:ev, diff, label:`Turning ${age}`, color:EVENT_TYPES.birthday.color });
           }
         }
       }
-      // Work anniversary
+
+      // 6-Month Eval
       if (c.startDate) {
         const start = new Date(c.startDate);
         if (!isNaN(start.getTime())) {
-          const thisYearAnni = new Date(today.getFullYear(), start.getMonth(), start.getDate());
-          const nextYearAnni = new Date(today.getFullYear()+1, start.getMonth(), start.getDate());
-          const anni = thisYearAnni >= today ? thisYearAnni : nextYearAnni;
-          const diff = Math.ceil((anni - today) / 86400000);
-          if (diff <= days) {
-            const years = today.getFullYear() - start.getFullYear() + (anni.getFullYear() > today.getFullYear() ? 1 : 0);
-            events.push({ type:"anniversary", name:c.name, client:c.client, date:anni, diff, label:`🏆 ${years} year${years!==1?"s":""}`, color:C.blue });
+          let evalDate = new Date(start);
+          evalDate.setMonth(evalDate.getMonth() + 6);
+          while (evalDate < today) evalDate.setMonth(evalDate.getMonth() + 6);
+          const diff = Math.ceil((evalDate - today) / 86400000);
+          if (diff <= 60) {
+            const months = Math.round((evalDate - start) / (1000*60*60*24*30.44));
+            events.push({ type:"eval", name:c.name, client:c.client, date:evalDate, diff, label:`${months}-month eval`, color:EVENT_TYPES.eval.color });
+          }
+        }
+      }
+
+      // Anniversary
+      if (c.startDate) {
+        const start = new Date(c.startDate);
+        if (!isNaN(start.getTime())) {
+          const thisYr = new Date(today.getFullYear(), start.getMonth(), start.getDate());
+          const ev = thisYr >= today ? thisYr : new Date(today.getFullYear()+1, start.getMonth(), start.getDate());
+          const diff = Math.ceil((ev - today) / 86400000);
+          if (diff <= 60) {
+            const years = today.getFullYear() - start.getFullYear() + (ev.getFullYear() > today.getFullYear() ? 1 : 0);
+            if (years > 0) events.push({ type:"anniversary", name:c.name, client:c.client, date:ev, diff, label:`${years} year${years!==1?"s":""}`, color:EVENT_TYPES.anniversary.color });
           }
         }
       }
@@ -2170,33 +2948,41 @@ function AHRCalendar({ contractors }) {
     return events.sort((a,b)=>a.diff-b.diff);
   };
 
-  const upcoming = getUpcoming(60);
+  const allEvents   = getEventsForMonth(viewMonth, viewYear);
+  const filtered    = filter==="all" ? allEvents : allEvents.filter(e=>e.type===filter);
+  const upcoming    = getUpcoming();
+  const upFiltered  = filter==="all" ? upcoming : upcoming.filter(e=>e.type===filter);
 
-  // Calendar grid
-  const daysInMonth  = new Date(viewYear, viewMonth+1, 0).getDate();
-  const firstDay     = new Date(viewYear, viewMonth, 1).getDay();
-  const monthName    = new Date(viewYear, viewMonth, 1).toLocaleString("en-US",{month:"long",year:"numeric"});
+  const daysInMonth = new Date(viewYear, viewMonth+1, 0).getDate();
+  const firstDay    = new Date(viewYear, viewMonth, 1).getDay();
+  const monthName   = new Date(viewYear, viewMonth, 1).toLocaleString("en-US",{month:"long",year:"numeric"});
   const prevM = () => { if(viewMonth===0){setViewMonth(11);setViewYear(y=>y-1);}else setViewMonth(m=>m-1); };
   const nextM = () => { if(viewMonth===11){setViewMonth(0);setViewYear(y=>y+1);}else setViewMonth(m=>m+1); };
+  const isToday = (d) => d && viewYear===today.getFullYear() && viewMonth===today.getMonth() && d===today.getDate();
 
-  const getEventsForDay = (day) => {
-    const d = new Date(viewYear, viewMonth, day);
-    return upcoming.filter(e => e.date.getDate()===d.getDate() && e.date.getMonth()===d.getMonth() && e.date.getFullYear()===d.getFullYear());
-  };
+  const getEventsForDay = (day) => filtered.filter(e => e.day===day);
 
   const cells = [];
   for(let i=0;i<firstDay;i++) cells.push(null);
   for(let d=1;d<=daysInMonth;d++) cells.push(d);
   while(cells.length%7!==0) cells.push(null);
 
-  const isToday = (d) => d && viewYear===today.getFullYear() && viewMonth===today.getMonth() && d===today.getDate();
+  const btnStyle = (active) => ({ padding:"6px 14px", borderRadius:20, border:`1.5px solid ${active?C.blue:C.border}`, background:active?"#DBEAFE":"#fff", color:active?C.blue:C.muted, fontSize:12, fontWeight:active?700:500, cursor:"pointer", fontFamily:"inherit" });
 
   return (
-    <div style={{ padding:"28px 20px", maxWidth:1000, margin:"0 auto" }}>
+    <div style={{ padding:"28px 20px", maxWidth:1060, margin:"0 auto" }}>
       <div style={{ fontSize:20, fontWeight:800, marginBottom:6 }}>HR Calendar</div>
-      <div style={{ fontSize:14, color:C.muted, marginBottom:20 }}>Birthdays and work anniversaries for your team.</div>
+      <div style={{ fontSize:14, color:C.muted, marginBottom:16 }}>Birthdays, 6-month evaluations, and work anniversaries.</div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 280px", gap:20, alignItems:"start" }}>
+      {/* Filter pills */}
+      <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" }}>
+        <button onClick={()=>setFilter("all")}         style={btnStyle(filter==="all")}>All Events</button>
+        <button onClick={()=>setFilter("birthday")}    style={btnStyle(filter==="birthday")}>🎂 Birthdays</button>
+        <button onClick={()=>setFilter("eval")}        style={btnStyle(filter==="eval")}>📋 6-Month Evals</button>
+        <button onClick={()=>setFilter("anniversary")} style={btnStyle(filter==="anniversary")}>🏆 Anniversaries</button>
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 300px", gap:20, alignItems:"start" }}>
         {/* Calendar */}
         <Card>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
@@ -2213,13 +2999,14 @@ function AHRCalendar({ contractors }) {
             {cells.map((d,i)=>{
               const evs = d ? getEventsForDay(d) : [];
               return (
-                <div key={i} style={{ minHeight:68, borderRadius:8, padding:"4px 6px", background:isToday(d)?"#EFF6FF":d?"#fff":"transparent", border:isToday(d)?`2px solid ${C.blue}`:`1px solid ${C.border}` }}>
+                <div key={i} style={{ minHeight:72, borderRadius:8, padding:"4px 6px", background:isToday(d)?"#EFF6FF":d?"#fff":"transparent", border:isToday(d)?`2px solid ${C.blue}`:`1px solid ${C.border}` }}>
                   {d && (
                     <>
                       <div style={{ fontSize:12, fontWeight:isToday(d)?800:500, color:isToday(d)?C.blue:C.navy, marginBottom:3 }}>{d}</div>
                       {evs.map((e,j)=>(
-                        <div key={j} title={e.name+" · "+e.label} style={{ background:e.color+"22", color:e.color, fontSize:9, fontWeight:700, padding:"2px 5px", borderRadius:4, marginBottom:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                          {e.type==="birthday"?"🎂":"🏆"} {e.name.split(" ")[0]}
+                        <div key={j} title={`${e.name} · ${EVENT_TYPES[e.type].icon} ${e.label}`}
+                          style={{ background:e.color+"22", color:e.color, fontSize:9, fontWeight:700, padding:"2px 5px", borderRadius:4, marginBottom:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                          {EVENT_TYPES[e.type].icon} {e.name.split(" ")[0]}
                         </div>
                       ))}
                     </>
@@ -2234,29 +3021,39 @@ function AHRCalendar({ contractors }) {
         <div>
           <Card style={{ marginBottom:14 }}>
             <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Upcoming (60 days)</div>
-            {upcoming.length===0
+            {upFiltered.length===0
               ? <div style={{ fontSize:13, color:C.muted }}>No upcoming events.</div>
-              : upcoming.map((e,i)=>(
-                <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderBottom:i<upcoming.length-1?`1px solid ${C.border}`:"none" }}>
+              : upFiltered.map((e,i)=>(
+                <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderBottom:i<upFiltered.length-1?`1px solid ${C.border}`:"none" }}>
                   <div style={{ width:36, height:36, borderRadius:10, background:e.color+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>
-                    {e.type==="birthday"?"🎂":"🏆"}
+                    {EVENT_TYPES[e.type].icon}
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:13, fontWeight:700, color:C.navy, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{e.name}</div>
-                    <div style={{ fontSize:11, color:C.muted }}>{e.label} · {e.client}</div>
+                    <div style={{ fontSize:11, color:e.color, fontWeight:600 }}>{EVENT_TYPES[e.type].icon} {e.label}</div>
+                    <div style={{ fontSize:11, color:C.muted }}>{e.client}</div>
                   </div>
                   <div style={{ textAlign:"right", flexShrink:0 }}>
-                    <div style={{ fontSize:12, fontWeight:700, color:e.color }}>{e.diff===0?"Today":e.diff===1?"Tomorrow":"In "+e.diff+" days"}</div>
+                    <div style={{ fontSize:12, fontWeight:700, color:e.color }}>{e.diff===0?"Today":e.diff===1?"Tomorrow":"In "+e.diff+"d"}</div>
                     <div style={{ fontSize:10, color:C.muted }}>{e.date.toLocaleDateString("en-PH",{month:"short",day:"numeric"})}</div>
                   </div>
                 </div>
               ))
             }
           </Card>
-          <div style={{ fontSize:10, color:C.muted, padding:"0 4px" }}>
-            <div style={{ display:"flex", gap:8, marginBottom:4 }}><span>🎂</span> Birthday</div>
-            <div style={{ display:"flex", gap:8 }}><span>🏆</span> Work Anniversary</div>
-          </div>
+          {/* Legend */}
+          <Card style={{ padding:14 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:10, textTransform:"uppercase", letterSpacing:"0.5px" }}>Legend</div>
+            {Object.entries(EVENT_TYPES).map(([k,v])=>(
+              <div key={k} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                <div style={{ width:10, height:10, borderRadius:3, background:v.color, flexShrink:0 }}/>
+                <span style={{ fontSize:12 }}>{v.icon} {v.label}</span>
+              </div>
+            ))}
+            <div style={{ marginTop:10, paddingTop:10, borderTop:`1px solid ${C.border}`, fontSize:11, color:C.muted, lineHeight:1.5 }}>
+              6-month evals recur every 6 months from each contractor's start date.
+            </div>
+          </Card>
         </div>
       </div>
     </div>
@@ -2414,8 +3211,12 @@ function APayrollSummary({ payslips, contractors, perms, user }) {
 }
 
 function ALeaveApprovals({ user, leaves, setLeaves, setContractors, contractors, perms, onNotify }) {
-  const [filter,      setFilter]      = useState("Pending");
-  const [searchLeave, setSearchLeave] = useState("");
+  const [filter,       setFilter]       = useState("Pending");
+  const [searchLeave,  setSearchLeave]  = useState("");
+  const [rejectModal,  setRejectModal]  = useState(null); // holds leaveId being rejected
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectErr,    setRejectErr]    = useState("");
+
   const visible   = getVisible(user,contractors,perms);
   const myLeaves  = leaves.filter(l=>visible.find(c=>c.username===l.username));
   const filtered  = myLeaves
@@ -2425,10 +3226,16 @@ function ALeaveApprovals({ user, leaves, setLeaves, setContractors, contractors,
       (l.username||"").toLowerCase().includes(searchLeave.toLowerCase()));
   const pendingCt = myLeaves.filter(l=>l.status==="Pending").length;
 
-  const action = (leaveId, act) => {
+  const action = (leaveId, act, reason) => {
     const leave = leaves.find(l=>l.leaveId===leaveId); if(!leave)return;
     const dated = user.name+" - "+formatPHT(nowPHT(),{month:"short",day:"numeric",year:"numeric"});
-    if (!DEMO_MODE) callScript(act==="approve"?"approveLeave":"rejectLeave", {leaveId, adminName:user.name}, ()=>{}, ()=>{});
+    if (!DEMO_MODE) callScript(
+      act==="approve" ? "approveLeave" : "rejectLeave",
+      act==="approve"
+        ? { leaveId, adminName:user.name }
+        : { leaveId, adminName:user.name, rejectReason:reason||"" },
+      ()=>{}, ()=>{}
+    );
     setLeaves(prev=>prev.map(l=>l.leaveId===leaveId?{...l,status:act==="approve"?"Approved":"Rejected",actionedBy:dated}:l));
     if (onNotify) onNotify("Leave "+(act==="approve"?"Approved":"Rejected"), leave.name+"'s "+leave.leaveType+" request was "+(act==="approve"?"approved":"rejected")+".");
     toast(leave.name+"'s "+leave.leaveType+" "+(act==="approve"?"approved ✓":"rejected"), act==="approve"?"success":"error");
@@ -2447,6 +3254,15 @@ function ALeaveApprovals({ user, leaves, setLeaves, setContractors, contractors,
         return{...c,slPending:Math.max(0,parseFloat((c.slPending-hrs).toFixed(2)))};
       }));
     }
+  };
+
+  const openReject = (leaveId) => { setRejectModal(leaveId); setRejectReason(""); setRejectErr(""); };
+
+  const confirmReject = () => {
+    if (!rejectReason.trim()) { setRejectErr("Please provide a reason for rejection."); return; }
+    action(rejectModal, "reject", rejectReason.trim());
+    setRejectModal(null);
+    setRejectReason("");
   };
 
   return (
@@ -2489,12 +3305,37 @@ function ALeaveApprovals({ user, leaves, setLeaves, setContractors, contractors,
             {l.status==="Pending"&&(
               <div style={{ display:"flex", gap:8 }}>
                 <Btn variant="success" onClick={()=>action(l.leaveId,"approve")} style={{ padding:"7px 16px", fontSize:13 }}>Approve</Btn>
-                <Btn variant="danger"  onClick={()=>action(l.leaveId,"reject")}  style={{ padding:"7px 16px", fontSize:13 }}>Reject</Btn>
+                <Btn variant="danger"  onClick={()=>openReject(l.leaveId)}       style={{ padding:"7px 16px", fontSize:13 }}>Reject</Btn>
               </div>
             )}
           </div>
         ))
       }
+
+      {/* Rejection reason modal */}
+      {rejectModal && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(27,42,74,0.65)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:300, padding:16 }}>
+          <div style={{ background:"#fff", borderRadius:16, padding:32, width:"100%", maxWidth:440, boxShadow:"0 24px 80px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize:18, fontWeight:800, color:C.navy, marginBottom:6 }}>Reject Leave Request</div>
+            <div style={{ fontSize:13, color:C.muted, marginBottom:20, lineHeight:1.5 }}>
+              Please provide a reason for rejection. This will be emailed to the contractor and CC'd to <b>hr@elitegrid.co</b>.
+            </div>
+            <FieldLabel required>Reason for Rejection</FieldLabel>
+            <textarea
+              value={rejectReason}
+              onChange={e=>{ setRejectReason(e.target.value); setRejectErr(""); }}
+              placeholder="e.g. Insufficient leave balance, project deadline conflict, overlapping team leave..."
+              rows={4}
+              style={{ width:"100%", padding:"10px 13px", borderRadius:10, border:`1.5px solid ${rejectErr?C.red:C.border}`, fontSize:13, fontFamily:"inherit", outline:"none", resize:"vertical", marginBottom:rejectErr?6:14, boxSizing:"border-box" }}
+            />
+            {rejectErr && <div style={{ fontSize:12, color:C.red, marginBottom:12 }}>{rejectErr}</div>}
+            <div style={{ display:"flex", gap:10 }}>
+              <Btn variant="danger" onClick={confirmReject} style={{ flex:1, padding:11 }}>Confirm Rejection</Btn>
+              <Btn variant="secondary" onClick={()=>{ setRejectModal(null); setRejectReason(""); setRejectErr(""); }} style={{ flex:1, padding:11 }}>Cancel</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2996,7 +3837,7 @@ function AClients({ user, contractors, clients, setClients }) {
                         <div style={{ fontSize:11, color:C.muted }}>{c.position} - {c.tier}</div>
                       </div>
                     </div>
-                    <div style={{ fontSize:13, fontWeight:700, color:C.blue }}>{c.rate}</div>
+                    <div style={{ fontSize:13, fontWeight:700, color:C.blue }}>{fmtRate(c.rate)}</div>
                   </div>
                 ))
               }
@@ -3352,6 +4193,13 @@ function App() {
       if (u.allContractors && u.allContractors.length > 0) {
         setContractors(u.allContractors.map(c=>({...c, role:normalizeRoleStr(c.role)})));
       }
+      // For contractors: load teammates so team calendar shows correct client
+      if (u.teammates && u.teammates.length > 0 && !(u.allContractors && u.allContractors.length > 0)) {
+        setContractors(u.teammates);
+      }
+      // Update bankInfo and ptoHistory on refresh
+      if (u.bankInfo !== undefined)   { setCurrentUser(prev=>({...prev, _bankInfo:u.bankInfo})); }
+      if (u.ptoHistory !== undefined) { setCurrentUser(prev=>({...prev, _ptoHistory:u.ptoHistory})); }
       // Update perms from Sheet on refresh too
       if (u.adminPerms && Object.keys(u.adminPerms).length > 0) {
         const np = {};
@@ -3398,9 +4246,16 @@ function App() {
       if (u.allLeaves !== undefined && u.allLeaves.length > 0) setLeaves(u.allLeaves||[]);
       if (u.clients !== undefined)       setClients(u.clients||[]);
       if (u.announcements !== undefined) setAnnouncements(u.announcements||[]);
+      // Store ptoHistory on the user object for the PTO page
+      if (u.ptoHistory !== undefined) u._ptoHistory = u.ptoHistory;
+      if (u.bankInfo !== undefined)   u._bankInfo   = u.bankInfo;
       // Load all contractors - normalize roles
       if (u.allContractors !== undefined && u.allContractors.length > 0) {
         setContractors(u.allContractors.map(c=>({...c, role:normalizeRoleStr(c.role)})));
+      }
+      // For contractors: load teammates so team calendar works correctly
+      if (u.teammates !== undefined && u.teammates.length > 0 && !(u.allContractors && u.allContractors.length > 0)) {
+        setContractors(u.teammates);
       }
       // Load payslips immediately on login
       if (u.payslips !== undefined) setPayslips(u.payslips||[]);
@@ -3441,10 +4296,17 @@ function App() {
     startDate:      currentUser.profile.startDate,
     email:          currentUser.profile.email,
     supervisor:     currentUser.profile.supervisor||"",
-    dob:           currentUser.profile.dob||"",
+    dob:            currentUser.profile.dob||"",
     status:         currentUser.profile.status,
     role:           currentUser.profile.role||"contractor",
     photoUrl:       currentUser.profile.photoUrl||"",
+    contractType:   currentUser.profile.contractType||"",
+    addrStreet:     currentUser.profile.addrStreet||"",
+    addrCity:       currentUser.profile.addrCity||"",
+    addrProvince:   currentUser.profile.addrProvince||"",
+    addrCountry:    currentUser.profile.addrCountry||"",
+    addrZip:        currentUser.profile.addrZip||"",
+    personalGmail:  currentUser.profile.personalGmail||"",
     vlAccrued:      currentUser.pto ? parseFloat(currentUser.pto.vlAccrued)||0 : 0,
     vlUsed:         currentUser.pto ? parseFloat(currentUser.pto.vlUsed)||0 : 0,
     vlPending:      currentUser.pto ? parseFloat(currentUser.pto.vlPending)||0 : 0,
@@ -3454,7 +4316,7 @@ function App() {
     slUsed:         currentUser.pto ? parseFloat(currentUser.pto.slUsed)||0 : 0,
     slPending:      currentUser.pto ? parseFloat(currentUser.pto.slPending)||0 : 0,
   } : null;
-  const contractor = liveContractor || contractors.find(c=>c.username===currentUser._username) || contractors.find(c=>c.username===currentUser.username) || (contractors.length>0?contractors[0]:null);
+  const contractor = liveContractor || contractors.find(c=>c.username===currentUser._username) || contractors.find(c=>c.username===currentUser.username) || null;
 
   // Safety: if no contractor found and we're a contractor role, show loading
   if (isContractor && !contractor) {
@@ -3467,9 +4329,9 @@ function App() {
 
   const contractorPages = {
     "c-dashboard":     <CDashboard    user={currentUser} contractor={contractor} leaves={leaves} setPage={setPage}/>,
-    "c-profile":       <CProfile      contractor={contractor} setContractors={setContractors}/>,
+    "c-profile":       <CProfile      contractor={contractor} setContractors={setContractors} currentUser={currentUser} setCurrentUser={setCurrentUser}/>,
     "c-payslips":      <CPayslips     user={currentUser}/>,
-    "c-pto":           <CPTOPage      contractor={contractor} setPage={setPage}/>,
+    "c-pto":           <CPTOPage      contractor={contractor} setPage={setPage} leaves={leaves} ptoHistory={currentUser._ptoHistory||[]}/>,
     "c-leave":         <CLeave        user={currentUser} contractor={contractor} leaves={leaves} setLeaves={setLeaves} setContractors={setContractors} onContractorNotify={addNotification}/>,
     "c-announcements": <CAnnouncements announcements={announcements}/>,
     "c-calendar":      <CLeaveCalendar contractor={contractor} leaves={leaves} contractors={contractors}/>,
