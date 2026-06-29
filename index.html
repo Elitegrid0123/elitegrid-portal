@@ -56,10 +56,46 @@ const DEMO_MODE       = false;
 // API HELPER — calls Apps Script directly
 // ════════════════════════════════════════════════════════
 function callScript(action, params, onSuccess, onError) {
+  params = params || {};
   let qs = "action=" + encodeURIComponent(action);
   Object.keys(params).forEach(k => {
     qs += "&" + encodeURIComponent(k) + "=" + encodeURIComponent(params[k]);
   });
+
+  const runJSONP = () => {
+    const cbName = "_cb_" + Date.now() + "_" + Math.floor(Math.random() * 100000);
+    const timeout = setTimeout(() => {
+      delete window[cbName];
+      const el = document.getElementById(cbName);
+      if (el) el.remove();
+      if (onError) onError("timeout");
+    }, action === "uploadPhoto" ? 60000 : 20000);
+    window[cbName] = (data) => {
+      clearTimeout(timeout);
+      delete window[cbName];
+      const el = document.getElementById(cbName);
+      if (el) el.remove();
+      if (onSuccess) onSuccess(data);
+    };
+    const script = document.createElement("script");
+    script.id = cbName;
+    script.src = APPS_SCRIPT_URL + "?" + qs + "&callback=" + cbName;
+    script.onerror = () => {
+      clearTimeout(timeout);
+      delete window[cbName];
+      script.remove();
+      if (onError) onError("script_error");
+    };
+    document.head.appendChild(script);
+  };
+
+  // Photo uploads are large and Apps Script does not return CORS headers reliably.
+  // Use JSONP directly so the upload is not executed once by fetch and then again by fallback.
+  if (action === "uploadPhoto") {
+    runJSONP();
+    return;
+  }
+
   fetch(APPS_SCRIPT_URL + "?" + qs, {
     method: "GET",
     redirect: "follow",
@@ -69,33 +105,7 @@ function callScript(action, params, onSuccess, onError) {
   })
     .then(r => r.json())
     .then(json => { if (onSuccess) onSuccess(json); })
-    .catch(() => {
-      // fetch blocked by CORS - fall back to JSONP
-      const cbName = "_cb_" + Date.now();
-      const timeout = setTimeout(() => {
-        delete window[cbName];
-        const el = document.getElementById(cbName);
-        if (el) el.remove();
-        if (onError) onError("timeout");
-      }, 20000);
-      window[cbName] = (data) => {
-        clearTimeout(timeout);
-        delete window[cbName];
-        const el = document.getElementById(cbName);
-        if (el) el.remove();
-        if (onSuccess) onSuccess(data);
-      };
-      const script = document.createElement("script");
-      script.id = cbName;
-      script.src = APPS_SCRIPT_URL + "?" + qs + "&callback=" + cbName;
-      script.onerror = () => {
-        clearTimeout(timeout);
-        delete window[cbName];
-        script.remove();
-        if (onError) onError("script_error");
-      };
-      document.head.appendChild(script);
-    });
+    .catch(runJSONP);
 }
 // ════════════════════════════════════════════════════════
 
@@ -373,10 +383,34 @@ function PhotoUpload({ currentUrl, onSave, onClose, username }) {
     const file = e.target.files[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) { setErr("Please select an image file."); return; }
-    if (file.size > 5*1024*1024) { setErr("Image must be under 5MB."); return; }
-    setMimeType(file.type);
+    if (file.size > 8*1024*1024) { setErr("Image must be under 8MB."); return; }
+    setErr("Preparing photo...");
+
     const reader = new FileReader();
-    reader.onload = (ev) => { setB64(ev.target.result); setPreview(ev.target.result); setErr(""); };
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxSide = 420;
+        let w = img.width;
+        let h = img.height;
+        const scale = Math.min(1, maxSide / Math.max(w, h));
+        w = Math.max(1, Math.round(w * scale));
+        h = Math.max(1, Math.round(h * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        const compressed = canvas.toDataURL("image/jpeg", 0.72);
+        setMimeType("image/jpeg");
+        setB64(compressed);
+        setPreview(compressed);
+        setErr("");
+      };
+      img.onerror = () => setErr("Could not read this image. Please try another file.");
+      img.src = ev.target.result;
+    };
+    reader.onerror = () => setErr("Could not read this image. Please try again.");
     reader.readAsDataURL(file);
   };
 
@@ -722,7 +756,7 @@ function ContractorNav({ page, setPage, user, onLogout, onChPw, notifications, o
         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, padding:"8px 10px", background:"rgba(255,255,255,0.05)", borderRadius:10 }}>
           <Avatar name={user.name} photoUrl={user.photoUrl} size={32}/>
           <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ color:"#fff", fontSize:12, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{user.name.split(" ")[0]}</div>
+            <div style={{ color:"#fff", fontSize:12, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{String(user.name || user.profile?.name || user.username || "").split(" ")[0]}</div>
             <div style={{ color:C.muted, fontSize:10 }}>Contractor</div>
           </div>
           <NotificationBell notifications={notifications||[]} onClear={onClearNotifs} onMarkRead={onMarkRead}/>
@@ -817,7 +851,7 @@ function AdminNav({ page, setPage, user, onLogout, notifications, onClearNotifs,
         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, padding:"8px 10px", background:"rgba(255,255,255,0.05)", borderRadius:10 }}>
           <Avatar name={user.name} photoUrl={user.photoUrl} size={32}/>
           <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ color:"#fff", fontSize:12, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{user.name.split(" ")[0]}</div>
+            <div style={{ color:"#fff", fontSize:12, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{String(user.name || user.profile?.name || user.username || "").split(" ")[0]}</div>
             <div style={{ color:C.muted, fontSize:10 }}>{user.role==="superadmin"?"Super Admin":"Admin"}</div>
           </div>
           <NotificationBell notifications={notifications||[]} onClear={onClearNotifs} onMarkRead={onMarkRead}/>
@@ -889,6 +923,7 @@ function ChangePwModal({ user, onClose }) {
 
 function CDashboard({ user, contractor, leaves, setPage }) {
   const c = contractor;
+  if (!c) return null;
   const vlBal = Math.max(0,parseFloat((c.vlAccrued-c.vlUsed-c.vlPending).toFixed(2)));
   const slBal = Math.max(0,parseFloat((c.slTotal-c.slUsed-c.slPending).toFixed(2)));
   const _myUn = (user.username||user._username||"").toLowerCase();
@@ -915,7 +950,7 @@ function CDashboard({ user, contractor, leaves, setPage }) {
         </div>
       )}
       <div style={{ marginBottom:22 }}>
-        <div style={{ fontSize:22, fontWeight:800, marginBottom:4 }}>Welcome back, {user.name.split(" ")[0]}</div>
+        <div style={{ fontSize:22, fontWeight:800, marginBottom:4 }}>Welcome back, {String(user.name || user.profile?.name || user.username || "").split(" ")[0]}</div>
         <div style={{ fontSize:14, color:C.muted }}>{c.position} — {c.client} — {c.tier}</div>
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:14, marginBottom:22 }}>
@@ -966,7 +1001,7 @@ function ContractorDocs({ contractor, user, canManage }) {
   React.useEffect(() => {
     if (!contractor || DEMO_MODE) { setLoading(false); return; }
     callScript("getDocs", {username: contractor.username}, (json) => {
-      if (json.success) setDocs(json.docs||[]);
+      if (json && json.success) setDocs(Array.isArray(json.docs) ? json.docs : []);
       setLoading(false);
     }, () => setLoading(false));
   }, [contractor && contractor.username]);
@@ -1052,11 +1087,11 @@ function ContractorDocs({ contractor, user, canManage }) {
 
       {loading
         ? <div style={{ color:C.muted, fontSize:13, padding:"12px 0" }}>Loading documents...</div>
-        : docs.length===0
+        : (!Array.isArray(docs) || docs.length===0)
           ? <div style={{ color:C.muted, fontSize:13, padding:"12px 0", fontStyle:"italic" }}>No documents on file yet.</div>
           : <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-              {docs.map(d=>(
-                <div key={d.docId} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 14px", background:"#fff", borderRadius:8, border:`1px solid ${C.border}`, gap:10, flexWrap:"wrap" }}>
+              {docs.filter(Boolean).map(d=>(
+                <div key={d.docId || d.driveLink || d.docName} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 14px", background:"#fff", borderRadius:8, border:`1px solid ${C.border}`, gap:10, flexWrap:"wrap" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                     <span style={{ background:catColor[d.category]||C.muted, color:"#fff", fontSize:10, fontWeight:700, padding:"2px 9px", borderRadius:20, whiteSpace:"nowrap" }}>{d.category}</span>
                     <div>
@@ -1088,7 +1123,6 @@ function ContractorDocs({ contractor, user, canManage }) {
 }
 
 function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
-  const c = contractor;
   const [photoModal,    setPhotoModal]    = useState(false);
   const [chPw,          setChPw]          = useState(false);
   const [editPersonal,  setEditPersonal]  = useState(false);
@@ -1100,11 +1134,17 @@ function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
   const [savingPersonal,setSavingPersonal]= useState(false);
   const [savingBank,    setSavingBank]    = useState(false);
 
-  const initials  = c.name ? c.name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
-  const bankInfo  = (currentUser&&currentUser._bankInfo)||{};
-  const payslips  = (currentUser&&currentUser._payslips)||[];
-  const myUn      = (currentUser&&(currentUser._username||currentUser.username)||"").toLowerCase();
-  const mySlips   = payslips.filter(p=>!p.username||p.username.toLowerCase()===myUn);
+  // Guard AFTER hooks (Rules of Hooks: no hooks after early return)
+  const c = contractor;
+  if (!c) return null;
+
+  const initials  = c.name ? String(c.name).split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
+  const bankInfoRaw = currentUser && currentUser._bankInfo;
+  const bankInfo  = (bankInfoRaw && typeof bankInfoRaw === "object" && !Array.isArray(bankInfoRaw)) ? bankInfoRaw : {};
+  const payslipsRaw = currentUser && currentUser._payslips;
+  const payslips  = Array.isArray(payslipsRaw) ? payslipsRaw : [];
+  const myUn      = String((currentUser&&(currentUser._username||currentUser.username))||"").toLowerCase();
+  const mySlips   = payslips.filter(p=>p && (!p.username||String(p.username).toLowerCase()===myUn));
 
   // Tenure calculation
   const calcTenure = (sd) => {
@@ -1127,6 +1167,7 @@ function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
   };
 
   const openPersonal = () => {
+    // c comes from liveContractor (currentUser.profile) which is now kept up-to-date after saves
     setPersonalForm({
       dob:          c.dob||"",
       personalGmail:c.personalGmail||"",
@@ -1148,23 +1189,30 @@ function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
     }
     setSavingPersonal(true);
     const updates = { username:c.username, ...personalForm };
-    if (!DEMO_MODE) {
-      callScript("updateContractor", updates, () => {
-        setContractors(prev=>prev.map(ct=>ct.username===c.username?{...ct,...personalForm}:ct));
-        setSavingPersonal(false);
-        setEditPersonal(false);
-        toast("Personal info saved ✓");
-      }, () => { setPersonalErr("Failed to save. Try again."); setSavingPersonal(false); });
-    } else {
+    const applyUpdates = () => {
+      // Update contractors state (for admin/team views)
       setContractors(prev=>prev.map(ct=>ct.username===c.username?{...ct,...personalForm}:ct));
+      // CRITICAL: also update currentUser.profile so re-opening the modal shows saved values
+      if (setCurrentUser) {
+        setCurrentUser(prev => ({
+          ...prev,
+          profile: prev.profile ? { ...prev.profile, ...personalForm } : prev.profile
+        }));
+      }
       setSavingPersonal(false);
       setEditPersonal(false);
       toast("Personal info saved ✓");
+    };
+    if (!DEMO_MODE) {
+      callScript("updateContractor", updates, applyUpdates,
+        () => { setPersonalErr("Failed to save. Try again."); setSavingPersonal(false); });
+    } else {
+      applyUpdates();
     }
   };
 
   const openBank = () => {
-    const PH_BANKS = ["BDO Unibank","Bank of the Philippine Islands (BPI)","Metrobank","Land Bank of the Philippines","Development Bank of the Philippines (DBP)","Philippine National Bank (PNB)","Security Bank","China Banking Corporation (Chinabank)","RCBC (Rizal Commercial Banking Corporation)","EastWest Bank","UnionBank of the Philippines","PSBank (Philippine Savings Bank)","Maybank Philippines","Citibank Philippines","HSBC Philippines","Standard Chartered Philippines","Bank of Commerce","Asia United Bank (AUB)","Philippine Bank of Communications (PBCom)","Sterling Bank of Asia","Robinsons Bank","CTBC Bank Philippines","PBB (Philippine Business Bank)","Producers Savings Bank","Wealth Development Bank","AllBank","Enterprise Bank","Dungganon Bank","1st Valley Bank","Rural Bank of Batangas","GCash (G-Xchange Inc.)","PayMaya / Maya Bank","Tonik Digital Bank","GoTyme Bank","SeaBank Philippines","OFBank (Overseas Filipino Bank)","CIMB Bank Philippines","ING Bank Philippines","SB Finance","BPI Direct BanKo"];
+    const PH_BANKS = ["1st Valley Bank","AllBank","Asia United Bank (AUB)","Bank of Commerce","Bank of the Philippine Islands (BPI)","BDO Unibank","BPI Direct BanKo","China Banking Corporation (Chinabank)","CIMB Bank Philippines","Citibank Philippines","CTBC Bank Philippines","Development Bank of the Philippines (DBP)","Dungganon Bank","EastWest Bank","Enterprise Bank","GCash (G-Xchange Inc.)","GoTyme Bank","HSBC Philippines","ING Bank Philippines","Land Bank of the Philippines","Maybank Philippines","Metrobank","OFBank (Overseas Filipino Bank)","PayMaya / Maya Bank","PBB (Philippine Business Bank)","Philippine Bank of Communications (PBCom)","Philippine National Bank (PNB)","Producers Savings Bank","PSBank (Philippine Savings Bank)","RCBC (Rizal Commercial Banking Corporation)","Robinsons Bank","Rural Bank of Batangas","SB Finance","SeaBank Philippines","Security Bank","Standard Chartered Philippines","Sterling Bank of Asia","Tonik Digital Bank","UnionBank of the Philippines","Wealth Development Bank"];
     const existing = bankInfo.bankName||"";
     const preset = PH_BANKS.includes(existing) ? existing : (existing ? "__manual__" : "");
     setBankForm({
@@ -1180,8 +1228,8 @@ function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
   };
 
   const saveBank = () => {
-    if (!bankForm.bankName.trim())     { setBankErr("Bank name is required."); return; }
-    if (!bankForm.accountNumber.trim()){ setBankErr("Account number is required."); return; }
+    if (!String(bankForm.bankName||"").trim())     { setBankErr("Bank name is required."); return; }
+    if (!String(bankForm.accountNumber||"").trim()){ setBankErr("Account number is required."); return; }
     if (!bankForm.payoutMethod)        { setBankErr("Payout method is required."); return; }
     setSavingBank(true);
     const payload = { username:c.username, ...bankForm };
@@ -1237,7 +1285,7 @@ function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
           <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${C.border}`, padding:20, textAlign:"center", marginBottom:14 }}>
             <div style={{ position:"relative", display:"inline-block", marginBottom:10 }}>
               {c.photoUrl
-                ? <img src={c.photoUrl} alt={c.name} style={{ width:80, height:80, borderRadius:"50%", objectFit:"cover", border:`3px solid ${C.cyan}` }} onError={e=>{e.target.style.display="none";e.target.parentNode.querySelector(".avatar-initials")&&(e.target.parentNode.querySelector(".avatar-initials").style.display="flex");}}/>
+                ? <img src={c.photoUrl} alt={c.name} style={{ width:80, height:80, borderRadius:"50%", objectFit:"cover", border:`3px solid ${C.cyan}` }} onError={e=>{e.target.style.display="none"; const fallback=e.target.parentNode&&e.target.parentNode.querySelector(".avatar-initials"); if(fallback) fallback.style.display="flex";}}/>
                 : <div style={{ width:80, height:80, borderRadius:"50%", background:`linear-gradient(135deg,${C.cyan},${C.blueDk})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, fontWeight:800, color:"#fff" }}>{initials}</div>
               }
             </div>
@@ -1347,7 +1395,7 @@ function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
                     <div style={{ width:38, height:38, borderRadius:10, background:"#DBEAFE", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20 }}>🏦</div>
                     <div>
                       <div style={{ fontSize:14, fontWeight:700, color:C.navy }}>{bankInfo.bankName}</div>
-                      <div style={{ fontSize:12, color:C.muted }}>••••  ••••  {(bankInfo.accountNumber||"").slice(-4)}</div>
+                      <div style={{ fontSize:12, color:C.muted }}>••••  ••••  {String(bankInfo.accountNumber||"").slice(-4)}</div>
                     </div>
                   </div>
                   <span style={{ fontSize:11, fontWeight:700, background:C.greenBg, color:C.green, padding:"3px 10px", borderRadius:20 }}>{bankInfo.payoutMethod||"—"}</span>
@@ -1434,12 +1482,12 @@ function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
                   else sb("bankName", "");
                 }} style={{ width:"100%", padding:"10px 13px", borderRadius:10, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", background:"#fff", marginBottom:8 }}>
                   <option value="">Select a bank...</option>
-                  {["BDO Unibank","Bank of the Philippine Islands (BPI)","Metrobank","Land Bank of the Philippines","Development Bank of the Philippines (DBP)","Philippine National Bank (PNB)","Security Bank","China Banking Corporation (Chinabank)","RCBC (Rizal Commercial Banking Corporation)","EastWest Bank","UnionBank of the Philippines","PSBank (Philippine Savings Bank)","Maybank Philippines","Citibank Philippines","HSBC Philippines","Standard Chartered Philippines","Bank of Commerce","Asia United Bank (AUB)","Philippine Bank of Communications (PBCom)","Sterling Bank of Asia","Robinsons Bank","CTBC Bank Philippines","PBB (Philippine Business Bank)","Producers Savings Bank","Wealth Development Bank","AllBank","Enterprise Bank","Dungganon Bank","1st Valley Bank","Rural Bank of Batangas","GCash (G-Xchange Inc.)","PayMaya / Maya Bank","Tonik Digital Bank","GoTyme Bank","SeaBank Philippines","OFBank (Overseas Filipino Bank)","CIMB Bank Philippines","ING Bank Philippines","SB Finance","BPI Direct BanKo"].map(b=>(
+                  {["1st Valley Bank","AllBank","Asia United Bank (AUB)","Bank of Commerce","Bank of the Philippine Islands (BPI)","BDO Unibank","BPI Direct BanKo","China Banking Corporation (Chinabank)","CIMB Bank Philippines","Citibank Philippines","CTBC Bank Philippines","Development Bank of the Philippines (DBP)","Dungganon Bank","EastWest Bank","Enterprise Bank","GCash (G-Xchange Inc.)","GoTyme Bank","HSBC Philippines","ING Bank Philippines","Land Bank of the Philippines","Maybank Philippines","Metrobank","OFBank (Overseas Filipino Bank)","PayMaya / Maya Bank","PBB (Philippine Business Bank)","Philippine Bank of Communications (PBCom)","Philippine National Bank (PNB)","Producers Savings Bank","PSBank (Philippine Savings Bank)","RCBC (Rizal Commercial Banking Corporation)","Robinsons Bank","Rural Bank of Batangas","SB Finance","SeaBank Philippines","Security Bank","Standard Chartered Philippines","Sterling Bank of Asia","Tonik Digital Bank","UnionBank of the Philippines","Wealth Development Bank"].map(b=>(
                     <option key={b} value={b}>{b}</option>
                   ))}
                   <option value="__manual__">Other (type manually)</option>
                 </select>
-                {(bankForm._bankPreset === "__manual__" || (bankForm.bankName && !["BDO Unibank","Bank of the Philippine Islands (BPI)","Metrobank","Land Bank of the Philippines","Development Bank of the Philippines (DBP)","Philippine National Bank (PNB)","Security Bank","China Banking Corporation (Chinabank)","RCBC (Rizal Commercial Banking Corporation)","EastWest Bank","UnionBank of the Philippines","PSBank (Philippine Savings Bank)","Maybank Philippines","Citibank Philippines","HSBC Philippines","Standard Chartered Philippines","Bank of Commerce","Asia United Bank (AUB)","Philippine Bank of Communications (PBCom)","Sterling Bank of Asia","Robinsons Bank","CTBC Bank Philippines","PBB (Philippine Business Bank)","Producers Savings Bank","Wealth Development Bank","AllBank","Enterprise Bank","Dungganon Bank","1st Valley Bank","Rural Bank of Batangas","GCash (G-Xchange Inc.)","PayMaya / Maya Bank","Tonik Digital Bank","GoTyme Bank","SeaBank Philippines","OFBank (Overseas Filipino Bank)","CIMB Bank Philippines","ING Bank Philippines","SB Finance","BPI Direct BanKo"].includes(bankForm.bankName))) && (
+                {(bankForm._bankPreset === "__manual__" || (bankForm.bankName && !["1st Valley Bank","AllBank","Asia United Bank (AUB)","Bank of Commerce","Bank of the Philippine Islands (BPI)","BDO Unibank","BPI Direct BanKo","China Banking Corporation (Chinabank)","CIMB Bank Philippines","Citibank Philippines","CTBC Bank Philippines","Development Bank of the Philippines (DBP)","Dungganon Bank","EastWest Bank","Enterprise Bank","GCash (G-Xchange Inc.)","GoTyme Bank","HSBC Philippines","ING Bank Philippines","Land Bank of the Philippines","Maybank Philippines","Metrobank","OFBank (Overseas Filipino Bank)","PayMaya / Maya Bank","PBB (Philippine Business Bank)","Philippine Bank of Communications (PBCom)","Philippine National Bank (PNB)","Producers Savings Bank","PSBank (Philippine Savings Bank)","RCBC (Rizal Commercial Banking Corporation)","Robinsons Bank","Rural Bank of Batangas","SB Finance","SeaBank Philippines","Security Bank","Standard Chartered Philippines","Sterling Bank of Asia","Tonik Digital Bank","UnionBank of the Philippines","Wealth Development Bank"].includes(bankForm.bankName))) && (
                   <FieldInput value={bankForm.bankName||""} onChange={e=>sb("bankName",e.target.value)} placeholder="Enter bank name manually"/>
                 )}
               </div>
@@ -1478,8 +1526,8 @@ function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
 function CPayslips({ user }) {
   const [sel,setSel] = useState(null);
   const myUsername = (user.username||user._username||"").toLowerCase();
-  const payslips = (user._payslips||[]).filter(p=>
-    !p.username || p.username.toLowerCase()===myUsername
+  const payslips = (Array.isArray(user._payslips) ? user._payslips : []).filter(p=>
+    p && (!p.username || String(p.username).toLowerCase()===myUsername)
   );
 
   // Recalculate net from components — fixes cases where stored net didn't include allowance
@@ -1553,8 +1601,9 @@ function CPayslips({ user }) {
 }
 
 function CPTOPage({ contractor, setPage, leaves, ptoHistory }) {
+  const [histModal, setHistModal] = useState(null);
   const c = contractor;
-  const [histModal, setHistModal] = useState(null); // "VL" or "SL"
+  if (!c) return null;
 
   const vlBal = Math.max(0,parseFloat((c.vlAccrued-c.vlUsed-c.vlPending).toFixed(2)));
   const slBal = Math.max(0,parseFloat((c.slTotal-c.slUsed-c.slPending).toFixed(2)));
@@ -1788,6 +1837,8 @@ function CLeave({ user, contractor, leaves, setLeaves, setContractors, onContrac
   const [approvalFile,setApprovalFile] = useState(null);
   const [approvalPreview,setApprovalPreview] = useState("");
   const fileInputRef = React.useRef();
+
+  if (!contractor) return null;
 
   const handleApprovalFile = (e) => {
     const file = e.target.files[0];
@@ -2054,7 +2105,7 @@ function CLeaveCalendar({ contractor, leaves, contractors, teamLeaves }) {
         {teammates.map(c=>(
           <div key={c.username} style={{ display:"flex", alignItems:"center", gap:6 }}>
             <div style={{ width:10, height:10, borderRadius:3, background:colorMap[c.username.toLowerCase()]||C.blue }}/>
-            <span style={{ fontSize:12, color:C.muted, fontWeight:600 }}>{c.name.split(" ")[0]}</span>
+            <span style={{ fontSize:12, color:C.muted, fontWeight:600 }}>{String(c.name || c.username || "").split(" ")[0]}</span>
           </div>
         ))}
       </div>
@@ -2083,7 +2134,7 @@ function CLeaveCalendar({ contractor, leaves, contractors, teamLeaves }) {
                       const ct  = teammates.find(c=>c.username.toLowerCase()===(l.username||"").toLowerCase());
                       return (
                         <div key={j} title={ct?ct.name:l.username} style={{ background:bg, color:"#fff", fontSize:9, fontWeight:700, padding:"2px 5px", borderRadius:4, marginBottom:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                          {ct?ct.name.split(" ")[0]:l.username} {l.leaveType}
+                          {ct?String(ct.name || ct.username || "").split(" ")[0]:l.username} {l.leaveType}
                         </div>
                       );
                     })}
@@ -2143,7 +2194,7 @@ function AOverview({ user, contractors, leaves, perms, setPage, announcements })
   return (
     <div style={{ padding:"28px 20px", maxWidth:960, margin:"0 auto" }}>
       <div style={{ marginBottom:22 }}>
-        <div style={{ fontSize:22, fontWeight:800, marginBottom:4 }}>Good day, {user.name.split(" ")[0]}</div>
+        <div style={{ fontSize:22, fontWeight:800, marginBottom:4 }}>Good day, {String(user.name || user.profile?.name || user.username || "").split(" ")[0]}</div>
         <div style={{ fontSize:14, color:C.muted }}>Here is what needs your attention.</div>
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:14, marginBottom:24 }}>
@@ -2259,6 +2310,9 @@ function ATeam({ user, contractors, setContractors, perms, rateHistory, setRateH
   const [viewTarget, setViewTarget] = useState(null);
   const [search,     setSearch]     = useState("");
   const [filterSt,   setFilterSt]   = useState("Active");
+  const [bankInfoCache, setBankInfoCache] = useState({});
+  const [adminBankEdit, setAdminBankEdit] = useState(null);
+  const [adminBankErr,  setAdminBankErr]  = useState("");
 
   const visible = getVisible(user,contractors,perms)
     .filter(c=>filterSt==="All"||c.status===filterSt)
@@ -2301,7 +2355,14 @@ function ATeam({ user, contractors, setContractors, perms, rateHistory, setRateH
                     </td>
                     <td style={{ padding:"12px 14px" }}>
                       <div style={{ fontWeight:600, fontSize:14, color:C.blue, cursor:"pointer", textDecoration:"underline", textDecorationStyle:"dotted", textUnderlineOffset:3 }}
-                        onClick={()=>setViewTarget(c)}>{c.name}</div>
+                        onClick={()=>{
+                          setViewTarget(c);
+                          if (!DEMO_MODE && !bankInfoCache[c.username]) {
+                            callScript("getBankInfo",{username:c.username},(json)=>{
+                              if (json && json.bankInfo) setBankInfoCache(prev=>({...prev,[c.username]:json.bankInfo}));
+                            },()=>{});
+                          }
+                        }}>{c.name}</div>
                       <div style={{ fontSize:12, color:C.muted }}>@{c.username} - {c.position}</div>
                     </td>
                     <td style={{ padding:"12px 14px" }}><span style={{ background:"#DBEAFE", color:"#1D4ED8", fontSize:11, fontWeight:700, padding:"3px 9px", borderRadius:20 }}>{c.client}</span></td>
@@ -2361,9 +2422,56 @@ function ATeam({ user, contractors, setContractors, perms, rateHistory, setRateH
       }} mode="edit" existing={editTarget} rateHistory={rateHistory}/>}
 
       {/* Admin contractor profile view modal — mirrors CProfile layout */}
+      {/* Superadmin edit bank info modal */}
+      {adminBankEdit && (() => {
+        const ab = adminBankEdit;
+        const sab = (k,v) => setAdminBankEdit(p=>({...p,[k]:v}));
+        const PH_BANKS_A = ["1st Valley Bank","AllBank","Asia United Bank (AUB)","Bank of Commerce","Bank of the Philippine Islands (BPI)","BDO Unibank","BPI Direct BanKo","China Banking Corporation (Chinabank)","CIMB Bank Philippines","Citibank Philippines","CTBC Bank Philippines","Development Bank of the Philippines (DBP)","Dungganon Bank","EastWest Bank","Enterprise Bank","GCash (G-Xchange Inc.)","GoTyme Bank","HSBC Philippines","ING Bank Philippines","Land Bank of the Philippines","Maybank Philippines","Metrobank","OFBank (Overseas Filipino Bank)","PayMaya / Maya Bank","PBB (Philippine Business Bank)","Philippine Bank of Communications (PBCom)","Philippine National Bank (PNB)","Producers Savings Bank","PSBank (Philippine Savings Bank)","RCBC (Rizal Commercial Banking Corporation)","Robinsons Bank","Rural Bank of Batangas","SB Finance","SeaBank Philippines","Security Bank","Standard Chartered Philippines","Sterling Bank of Asia","Tonik Digital Bank","UnionBank of the Philippines","Wealth Development Bank"];
+        const saveAdminBank = () => {
+          if (!ab.bankName||!ab.accountNumber) { setAdminBankErr("Bank name and account number are required."); return; }
+          const payload = { username:ab.username, bankName:ab.bankName, accountNumber:ab.accountNumber, swiftCode:ab.swiftCode||"", wiseEmail:ab.wiseEmail||"", payoutMethod:ab.payoutMethod||"Wise" };
+          if (!DEMO_MODE) callScript("saveBankInfo", payload, ()=>{}, ()=>{});
+          setBankInfoCache(prev=>({...prev,[ab.username]:payload}));
+          toast("Payment info updated for "+ab.username);
+          setAdminBankEdit(null); setAdminBankErr("");
+        };
+        return (
+          <div style={{ position:"fixed", inset:0, background:"rgba(27,42,74,0.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:400, padding:16 }} onClick={e=>e.target===e.currentTarget&&setAdminBankEdit(null)}>
+            <div style={{ background:"#fff", borderRadius:16, width:"100%", maxWidth:480, padding:28, boxShadow:"0 24px 80px rgba(0,0,0,0.3)" }}>
+              <div style={{ fontSize:16, fontWeight:800, color:C.navy, marginBottom:18 }}>Edit Payment Info — {ab.username}</div>
+              <FieldLabel required>Bank Name</FieldLabel>
+              <select value={ab._bankPreset||""} onChange={e=>{ const v=e.target.value; sab("_bankPreset",v); if(v!=="__manual__") sab("bankName",v); else sab("bankName",""); }} style={{ width:"100%", padding:"10px 13px", borderRadius:10, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", background:"#fff", marginBottom:8 }}>
+                <option value="">Select a bank...</option>
+                {PH_BANKS_A.map(b=>(<option key={b} value={b}>{b}</option>))}
+                <option value="__manual__">Other (type manually)</option>
+              </select>
+              {(ab._bankPreset==="__manual__"||(ab.bankName&&!PH_BANKS_A.includes(ab.bankName)))&&(
+                <FieldInput value={ab.bankName||""} onChange={e=>sab("bankName",e.target.value)} placeholder="Enter bank name manually" style={{ marginBottom:8 }}/>
+              )}
+              <FieldLabel required>Account Number</FieldLabel>
+              <FieldInput value={ab.accountNumber||""} onChange={e=>sab("accountNumber",e.target.value)} placeholder="Account number" style={{ marginBottom:8 }}/>
+              <FieldLabel>SWIFT / BIC (optional)</FieldLabel>
+              <FieldInput value={ab.swiftCode||""} onChange={e=>sab("swiftCode",e.target.value)} placeholder="e.g. BNORPHMM" style={{ marginBottom:8 }}/>
+              <FieldLabel>Wise Email (optional)</FieldLabel>
+              <FieldInput value={ab.wiseEmail||""} onChange={e=>sab("wiseEmail",e.target.value)} placeholder="wise@email.com" style={{ marginBottom:8 }}/>
+              <FieldLabel>Preferred Payout</FieldLabel>
+              <select value={ab.payoutMethod||"Wise"} onChange={e=>sab("payoutMethod",e.target.value)} style={{ width:"100%", padding:"10px 13px", borderRadius:10, border:`1.5px solid ${C.border}`, fontSize:14, fontFamily:"inherit", outline:"none", background:"#fff", marginBottom:16 }}>
+                <option>Wise</option><option>Bank Transfer</option>
+              </select>
+              {adminBankErr&&<div style={{ color:C.red, fontSize:12, marginBottom:10 }}>{adminBankErr}</div>}
+              <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+                <button onClick={()=>{setAdminBankEdit(null);setAdminBankErr("");}} style={{ background:C.off, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 18px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>Cancel</button>
+                <Btn onClick={saveAdminBank}>Save</Btn>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {viewTarget && (()=>{
         const vt = viewTarget;
-        const vtInitials = vt.name ? vt.name.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
+        const vtBankInfo = bankInfoCache[vt.username] || null;
+        const vtInitials = vt.name ? String(vt.name || vt.username || "").split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase() : "?";
         const vtVLBal = Math.max(0, parseFloat(((vt.vlAccrued||0)-(vt.vlUsed||0)-(vt.vlPending||0)).toFixed(2)));
         const vtSLBal = Math.max(0, parseFloat(((vt.slTotal||0)-(vt.slUsed||0)-(vt.slPending||0)).toFixed(2)));
         const vtTenure = (() => {
@@ -2484,19 +2592,30 @@ function ATeam({ user, contractors, setContractors, perms, rateHistory, setRateH
                     </div>
                   </div>
 
-                  {/* Payment Information — view only for admin */}
+                  {/* Payment Information — view only for admin, editable for superadmin */}
                   <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${C.border}`, overflow:"hidden" }}>
-                    <div style={{ padding:"12px 18px 8px", borderBottom:`1px solid ${C.border}`, fontSize:12, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.6px" }}>🏦 Payment Information</div>
+                    <div style={{ padding:"12px 18px 8px", borderBottom:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                      <span style={{ fontSize:12, fontWeight:700, color:C.muted, textTransform:"uppercase", letterSpacing:"0.6px" }}>🏦 Payment Information</span>
+                      {user.role==="superadmin" && (
+                        <button onClick={()=>{
+                          const bk = vtBankInfo||{};
+                          const PH_BANKS_A = ["1st Valley Bank","AllBank","Asia United Bank (AUB)","Bank of Commerce","Bank of the Philippine Islands (BPI)","BDO Unibank","BPI Direct BanKo","China Banking Corporation (Chinabank)","CIMB Bank Philippines","Citibank Philippines","CTBC Bank Philippines","Development Bank of the Philippines (DBP)","Dungganon Bank","EastWest Bank","Enterprise Bank","GCash (G-Xchange Inc.)","GoTyme Bank","HSBC Philippines","ING Bank Philippines","Land Bank of the Philippines","Maybank Philippines","Metrobank","OFBank (Overseas Filipino Bank)","PayMaya / Maya Bank","PBB (Philippine Business Bank)","Philippine Bank of Communications (PBCom)","Philippine National Bank (PNB)","Producers Savings Bank","PSBank (Philippine Savings Bank)","RCBC (Rizal Commercial Banking Corporation)","Robinsons Bank","Rural Bank of Batangas","SB Finance","SeaBank Philippines","Security Bank","Standard Chartered Philippines","Sterling Bank of Asia","Tonik Digital Bank","UnionBank of the Philippines","Wealth Development Bank"];
+                          const existing = bk.bankName||"";
+                          const preset = PH_BANKS_A.includes(existing)?existing:(existing?"__manual__":"");
+                          setAdminBankEdit({username:vt.username, bankName:existing, accountNumber:bk.accountNumber||"", swiftCode:bk.swiftCode||"", wiseEmail:bk.wiseEmail||"", payoutMethod:bk.payoutMethod||"Wise", _bankPreset:preset});
+                        }} style={{ fontSize:11, fontWeight:700, color:C.blue, background:"none", border:"none", cursor:"pointer", padding:0 }}>✏️ Edit</button>
+                      )}
+                    </div>
                     <div style={{ padding:"14px 18px" }}>
-                      {vt._bankInfo && vt._bankInfo.bankName ? (
+                      {vtBankInfo && vtBankInfo.bankName ? (
                         <div>
                           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 20px" }}>
                             {[
-                              ["Bank Name",    vt._bankInfo.bankName],
-                              ["Account",      "••••  ••••  "+(vt._bankInfo.accountNumber||"").slice(-4)],
-                              ["SWIFT/BIC",    vt._bankInfo.swiftCode||"—"],
-                              ["Wise Email",   vt._bankInfo.wiseEmail||"—"],
-                              ["Payout Method",vt._bankInfo.payoutMethod||"—"],
+                              ["Bank Name",    vtBankInfo.bankName],
+                              ["Account",      "••••  ••••  "+String(vtBankInfo.accountNumber||"").slice(-4)],
+                              ["SWIFT/BIC",    vtBankInfo.swiftCode||"—"],
+                              ["Wise Email",   vtBankInfo.wiseEmail||"—"],
+                              ["Payout Method",vtBankInfo.payoutMethod||"—"],
                             ].map(([l,v])=>(
                               <div key={l} style={fieldStyle2}>
                                 <div style={labelStyle2}>{l}</div>
@@ -2872,7 +2991,7 @@ function ALeaveCalendar({ leaves, contractors, perms, user }) {
                       const col = l.status==="Pending" ? C.amber : "#fff";
                       return (
                         <div key={j} title={c?c.name:l.username} style={{ background:bg, color:col, fontSize:9, fontWeight:700, padding:"2px 5px", borderRadius:4, marginBottom:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                          {c?c.name.split(" ")[0]:l.username.split("")[0]} {l.isHalfDay?"½":l.leaveType==="VL"?"VL":"SL"}
+                          {c?String(c.name || c.username || "").split(" ")[0]:String(l.username || "").split("")[0]} {l.isHalfDay?"½":l.leaveType==="VL"?"VL":"SL"}
                         </div>
                       );
                     })}
@@ -3057,7 +3176,7 @@ function AHRCalendar({ contractors }) {
                       {evs.map((e,j)=>(
                         <div key={j} title={`${e.name} · ${EVENT_TYPES[e.type].icon} ${e.label}`}
                           style={{ background:e.color+"22", color:e.color, fontSize:9, fontWeight:700, padding:"2px 5px", borderRadius:4, marginBottom:2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
-                          {EVENT_TYPES[e.type].icon} {e.name.split(" ")[0]}
+                          {EVENT_TYPES[e.type].icon} {String(e.name || "").split(" ")[0]}
                         </div>
                       ))}
                     </>
@@ -3881,7 +4000,7 @@ function AClients({ user, contractors, clients, setClients }) {
                   <div key={c.username} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 0", borderBottom:`1px solid ${C.border}` }}>
                     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                       <div style={{ width:34, height:34, borderRadius:"50%", background:`linear-gradient(135deg,${C.cyan},${C.blueDk})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:800, color:"#fff", flexShrink:0 }}>
-                        {c.name.split(" ").map(n=>n[0]).join("").slice(0,2)}
+                        {String(c.name || c.username || "").split(" ").map(n=>n[0]).join("").slice(0,2)}
                       </div>
                       <div>
                         <div style={{ fontSize:13, fontWeight:600, color:C.navy }}>{c.name}</div>
@@ -4138,6 +4257,28 @@ function ARolesAccess({ user, contractors, setContractors, perms, setPerms, upda
 }
 
 // ══════════════════════════════════════════════════════════
+// ERROR BOUNDARY — catches React render crashes instead of white screen
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError:false, error:null }; }
+  static getDerivedStateFromError(error) { return { hasError:true, error }; }
+  componentDidCatch(error, info) { console.error("Portal render error:", error, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        React.createElement("div", {style:{minHeight:"100vh",background:"#0D1B2A",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,sans-serif",padding:24}},
+          React.createElement("div", {style:{background:"#fff",borderRadius:16,padding:32,maxWidth:480,width:"100%",textAlign:"center"}},
+            React.createElement("div", {style:{fontSize:32,marginBottom:16}}, "⚠️"),
+            React.createElement("div", {style:{fontSize:18,fontWeight:800,color:"#1e3a5f",marginBottom:8}}, "Something went wrong"),
+            React.createElement("div", {style:{fontSize:13,color:"#6B7280",marginBottom:24}}, "Please refresh the page to continue."),
+            React.createElement("button", {onClick:()=>{ try{localStorage.removeItem("eg_session");}catch(e){} window.location.reload(); }, style:{background:"#1e3a5f",color:"#fff",border:"none",borderRadius:10,padding:"12px 28px",fontSize:14,fontWeight:700,cursor:"pointer"}}, "Refresh Page")
+          )
+        )
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ROOT APP
 // ══════════════════════════════════════════════════════════
 function App() {
@@ -4146,9 +4287,14 @@ function App() {
       const saved = localStorage.getItem("eg_session");
       if (!saved) return null;
       const u = JSON.parse(saved);
-      // Normalize role on restore
-      if (u && u.role) {
-        u.role = u.role==="Super Admin"?"superadmin":u.role==="Admin"?"admin":u.role==="Contractor"?"contractor":u.role;
+      if (!u) return null;
+      // Normalize role
+      if (u.role) u.role = u.role==="Super Admin"?"superadmin":u.role==="Admin"?"admin":u.role==="Contractor"?"contractor":u.role;
+      // Clear stale contractor sessions that lack profile — forces fresh login
+      const _role = (u.role||"").toLowerCase();
+      if (_role !== "superadmin" && _role !== "admin" && !u.profile) {
+        try { localStorage.removeItem("eg_session"); localStorage.removeItem("eg_un"); localStorage.removeItem("eg_pw"); } catch(ex) {}
+        return null;
       }
       return u;
     } catch(e) { return null; }
@@ -4229,30 +4375,29 @@ function App() {
     const un = currentUser._username || currentUser.username || (()=>{ try{return localStorage.getItem("eg_un");}catch(e){return null;} })();
     const pw = currentUser._password || currentUser.password || (()=>{ try{return localStorage.getItem("eg_pw");}catch(e){return null;} })();
     if (!un || !pw) return;
-    // Always re-fetch on mount to get fresh live data
     callScript("login", {username: un, password: pw}, (json) => {
       if (!json.success) return;
       const u = json.data;
-      if (u.allContractors && u.allContractors.length > 0) setContractors(u.allContractors);
+      if (u.allContractors && u.allContractors.length > 0) setContractors(u.allContractors.map(c=>({...c,role:normalizeRoleStr(c.role)})));
       if (u.allLeaves && u.allLeaves.length > 0) setLeaves(u.allLeaves);
       if (u.leaveRequests) setLeaves(u.leaveRequests);
       if (u.clients && u.clients.length > 0) setClients(u.clients);
       if (u.announcements) setAnnouncements(u.announcements);
       if (u.allPayslips && u.allPayslips.length > 0) setPayslips(u.allPayslips);
       else if (u.payslips) setPayslips(u.payslips);
-      // Normalize roles on all contractors
-      if (u.allContractors && u.allContractors.length > 0) {
-        setContractors(u.allContractors.map(c=>({...c, role:normalizeRoleStr(c.role)})));
-      }
-      // For contractors: load teammates so team calendar shows correct client
       if (u.teammates && u.teammates.length > 0 && !(u.allContractors && u.allContractors.length > 0)) {
         setContractors(u.teammates);
       }
-      // Update bankInfo and ptoHistory on refresh
-      if (u.bankInfo !== undefined)   { setCurrentUser(prev=>({...prev, _bankInfo:u.bankInfo})); }
-      if (u.ptoHistory !== undefined) { setCurrentUser(prev=>({...prev, _ptoHistory:u.ptoHistory})); }
-      if (u.teamLeaves !== undefined) { setCurrentUser(prev=>({...prev, _teamLeaves:u.teamLeaves})); }
-      // Update perms from Sheet on refresh too
+      // CRITICAL: update currentUser with fresh profile + pto so liveContractor stays valid
+      setCurrentUser(prev => ({
+        ...prev,
+        ...(u.profile                ? { profile:     u.profile     } : {}),
+        ...(u.pto                    ? { pto:         u.pto         } : {}),
+        ...(u.bankInfo   !== undefined ? { _bankInfo:   u.bankInfo   } : {}),
+        ...(u.ptoHistory !== undefined ? { _ptoHistory: u.ptoHistory } : {}),
+        ...(u.teamLeaves !== undefined ? { _teamLeaves: u.teamLeaves } : {}),
+        ...(u.payslips   !== undefined ? { _payslips:   u.payslips   } : {}),
+      }));
       if (u.adminPerms && Object.keys(u.adminPerms).length > 0) {
         const np = {};
         Object.keys(u.adminPerms).forEach(k => { np[k.toLowerCase()] = u.adminPerms[k]; });
@@ -4371,11 +4516,15 @@ function App() {
   } : null;
   const contractor = liveContractor || contractors.find(c=>c.username===currentUser._username) || contractors.find(c=>c.username===currentUser.username) || null;
 
-  // Safety: if no contractor found and we're a contractor role, show loading
+  // Safety: if no contractor found, show loading with a logout escape hatch
   if (isContractor && !contractor) {
     return (
-      <div style={{ minHeight:"100vh", background:C.navy, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"inherit" }}>
+      <div style={{ minHeight:"100vh", background:C.navy, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"inherit", flexDirection:"column", gap:16 }}>
         <div style={{ color:"#fff", fontSize:16, fontWeight:600 }}>Loading your profile...</div>
+        <div style={{ color:"rgba(255,255,255,0.5)", fontSize:12 }}>Taking too long?</div>
+        <button onClick={logout} style={{ background:"rgba(255,255,255,0.12)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:8, padding:"8px 20px", color:"#fff", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
+          Back to Login
+        </button>
       </div>
     );
   }
@@ -4441,7 +4590,7 @@ function App() {
 }
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(React.createElement(App));
+root.render(React.createElement(ErrorBoundary, null, React.createElement(App)));
 </script>
 </body>
 </html>
