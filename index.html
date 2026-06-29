@@ -48,7 +48,7 @@ const { useState, useRef, useEffect, useCallback } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx496iEIZ11DOurThKPfkKnPIEMtS-AAiKcxJNpIR_XyP1iVQVOIMR0bkk_zpax_Whp/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwwKph9_izXK26IAIJmvqMBoLAIJ-jEFOvA_1I_EtMuVeu53N0gDgT9xUG0KVEW0VaT/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -1252,6 +1252,16 @@ function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
               <button onClick={()=>setPhotoModal(true)} style={{ width:"100%", background:C.off, border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 12px", fontSize:12, color:C.blue, fontWeight:600, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
                 📷 {c.photoUrl?"Change Photo":"Add Photo"}
               </button>
+              {c.photoUrl && (
+                <button onClick={()=>{
+                  if (!window.confirm("Remove profile photo?")) return;
+                  setContractors(prev=>prev.map(ct=>ct.username===c.username?{...ct,photoUrl:""}:ct));
+                  if (!DEMO_MODE) callScript("updateContractor",{username:c.username,photoUrl:""},()=>{},()=>{});
+                  toast("Profile photo removed");
+                }} style={{ width:"100%", background:C.redBg, border:"1px solid #FECACA", borderRadius:8, padding:"7px 12px", fontSize:12, color:C.red, fontWeight:600, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                  🗑 Remove Photo
+                </button>
+              )}
               <button onClick={()=>setChPw(true)} style={{ width:"100%", background:C.off, border:`1px solid ${C.border}`, borderRadius:8, padding:"7px 12px", fontSize:12, color:C.muted, fontWeight:600, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
                 🔒 Change Password
               </button>
@@ -1560,63 +1570,99 @@ function CPTOPage({ contractor, setPage, leaves, ptoHistory }) {
     const monthlyRate = parseFloat(c.vlMonthlyRate)||13.33;
     const isVL = type === "VL";
 
-    // Starting point — VL starts at 0 on hire and accrues; SL starts at full lump sum
     if (c.startDate) {
       const start = new Date(c.startDate);
       if (!isNaN(start.getTime())) {
+        // Opening entry
         const initHrs = isVL ? 0 : (parseFloat(c.slTotal)||40);
-        events.push({ date:c.startDate, label:"Hired — "+(isVL?"VL starts at 0, accrues monthly":"SL initial allocation"), change:isVL?"0 hrs":"+"+initHrs+" hrs", type:"hire", _balance:initHrs });
+        events.push({
+          date: c.startDate,
+          label: "Hired — " + (isVL ? "VL starts at 0, accrues on 1st of each month" : "SL initial allocation (" + initHrs + " hrs)"),
+          change: isVL ? "0 hrs" : "+" + initHrs + " hrs",
+          type: "hire",
+          _balance: initHrs
+        });
 
         if (isVL) {
-          // Generate monthly accruals from start date up to today
+          // Calculate each monthly accrual from start date up to today
           const today = new Date();
-          let cur = new Date(start);
-          cur.setMonth(cur.getMonth()+1);
-          cur.setDate(1);
+          let cur = new Date(start.getFullYear(), start.getMonth() + 1, 1); // first day of month after hire
           let running = 0;
           while (cur <= today) {
-            const mon = cur.toLocaleDateString("en-US",{month:"short",year:"numeric"});
-            running = Math.min(200, parseFloat((running+monthlyRate).toFixed(2)));
-            events.push({ date:cur.toISOString().substring(0,10), label:"Monthly accrual — "+mon, change:"+"+monthlyRate+" hrs", type:"accrual", _balance:running });
-            cur.setMonth(cur.getMonth()+1);
+            running = Math.min(200, parseFloat((running + monthlyRate).toFixed(2)));
+            const mon = cur.toLocaleDateString("en-US", { month:"short", year:"numeric" });
+            events.push({
+              date: cur.toISOString().substring(0, 10),
+              label: "Monthly accrual — " + mon,
+              change: "+" + monthlyRate + " hrs",
+              type: "accrual",
+              _balance: running
+            });
+            cur.setMonth(cur.getMonth() + 1);
+          }
+        }
+
+        if (!isVL) {
+          // Annual SL resets - Jan 1 of each year after hire year
+          const today2 = new Date();
+          for (let yr = start.getFullYear() + 1; yr <= today2.getFullYear(); yr++) {
+            events.push({
+              date: yr + "-01-01",
+              label: "Annual SL reset — Jan 1, " + yr + " (balance restored to " + (parseFloat(c.slTotal)||40) + " hrs)",
+              change: "Reset → " + (parseFloat(c.slTotal)||40) + " hrs",
+              type: "hire",
+              _balance: parseFloat(c.slTotal)||40
+            });
           }
         }
       }
     }
 
-    // Leave deductions (approved only)
-    (leaves||[]).filter(l=>l.leaveType===type&&l.status==="Approved").forEach(l=>{
+    // Leave deductions from approved leaves
+    (leaves||[]).filter(l => l.leaveType === type && l.status === "Approved").forEach(l => {
       const hrs = parseFloat(l.hours)||0;
-      events.push({ date:String(l.start).substring(0,10), label:"Leave taken"+(l.isHalfDay?" (half day)":"")+(l.reason?" — "+l.reason:""), change:"-"+hrs+" hrs", type:"leave", _hrs:-hrs });
+      events.push({
+        date: String(l.start).substring(0, 10),
+        label: "Leave taken" + (l.isHalfDay ? " (half day)" : "") + (l.reason ? " — " + l.reason : ""),
+        change: "-" + hrs + " hrs",
+        type: "leave",
+        _hrs: -hrs
+      });
     });
 
-    // HR adjustments from audit log
-    (ptoHistory||[]).filter(e=>{
+    // HR adjustments from PTOAuditLog (if any exist)
+    (ptoHistory||[]).filter(e => {
       const f = e.field||"";
       return isVL ? f.startsWith("vl") : f.startsWith("sl");
-    }).forEach(e=>{
+    }).forEach(e => {
       const oldV = parseFloat(e.oldVal)||0;
       const newV = parseFloat(e.newVal)||0;
       const diff = newV - oldV;
-      const sign = diff>=0?"+":"";
-      events.push({ date:e.timestamp, label:"HR adjustment"+(e.reason?" — "+e.reason:"")+" ("+e.field+")", change:sign+diff.toFixed(2)+" hrs", type:"adjust", _balance:newV });
+      const sign = diff >= 0 ? "+" : "";
+      events.push({
+        date: e.timestamp,
+        label: "HR adjustment" + (e.reason ? " — " + e.reason : "") + " (" + e.field + ")",
+        change: sign + diff.toFixed(2) + " hrs",
+        type: "adjust",
+        _balance: newV
+      });
     });
 
-    // Sort chronologically (oldest first) to compute running balance
-    events.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+    // Sort oldest first to compute running balance
+    events.sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
     // Thread running balance through all events
     let running = 0;
     events.forEach(e => {
       if (e._balance !== undefined) {
-        running = e._balance; // hire/accrual/adjust set the balance directly
+        running = e._balance;
       } else if (e._hrs !== undefined) {
         running = Math.max(0, parseFloat((running + e._hrs).toFixed(2)));
       }
       e.balance = running;
     });
 
-    // Now reverse so newest is first
+    // Reverse to show newest first
     events.reverse();
     return events;
   };
@@ -1946,28 +1992,33 @@ function CLeave({ user, contractor, leaves, setLeaves, setContractors, onContrac
 
 
 // ── CONTRACTOR LEAVE CALENDAR ────────────────────────────────────────
-function CLeaveCalendar({ contractor, leaves, contractors }) {
+function CLeaveCalendar({ contractor, leaves, contractors, teamLeaves }) {
   const today   = new Date();
   const [year,  setYear]  = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
 
-  // Only show teammates on the same client
-  const myClient   = contractor ? contractor.client : "";
-  const teammates  = contractors.filter(c => c.client === myClient && c.status === "Active");
-  const teammateUns= new Set(teammates.map(c => c.username.toLowerCase()));
+  const myClient = contractor ? contractor.client : "";
 
-  // Approved leaves for the contractor AND all teammates on same client
-  const myUn = contractor ? contractor.username.toLowerCase() : "";
-  const teamLeaves = leaves.filter(l =>
-    l.status === "Approved" && (
-      (l.username||"").toLowerCase() === myUn ||
-      teammateUns.has((l.username||"").toLowerCase())
-    )
-  );
+  // Use teamLeaves from backend if available (real data), otherwise fall back to
+  // filtering contractors state (which may contain demo data)
+  const hasRealTeamLeaves = teamLeaves && teamLeaves.length > 0;
+
+  // Build the approved team leaves to show
+  const teamApprovedLeaves = hasRealTeamLeaves
+    ? teamLeaves.filter(l => l.status === "Approved")
+    : leaves.filter(l => l.status === "Approved");
+
+  // Determine who is on the team for the legend
+  // If we have real teammates from contractors state (non-demo), use them
+  // Otherwise derive from teamLeaves usernames
+  const isDemoContractors = contractors.some(c => c.username === "jdelacruz" || c.username === "mjangelica");
+  const teammates = isDemoContractors && hasRealTeamLeaves
+    ? [...new Map(teamApprovedLeaves.map(l => [l.username, { username:l.username, name:l.name, client:myClient, status:"Active" }])).values()]
+    : contractors.filter(c => c.client === myClient && c.status === "Active");
 
   const CLIENT_COLORS = ["#2E86C1","#5BC8E8","#16A34A","#D97706","#7C3AED","#DC2626","#0E7490"];
   const colorMap = {};
-  teammates.forEach((c,i) => colorMap[c.username.toLowerCase()] = CLIENT_COLORS[i % CLIENT_COLORS.length]);
+  teammates.forEach((c,i) => colorMap[(c.username||"").toLowerCase()] = CLIENT_COLORS[i % CLIENT_COLORS.length]);
 
   const daysInMonth = new Date(year, month+1, 0).getDate();
   const firstDay    = new Date(year, month, 1).getDay();
@@ -1976,7 +2027,7 @@ function CLeaveCalendar({ contractor, leaves, contractors }) {
   const pad = (n) => String(n).padStart(2,"0");
   const getLeavesForDay = (day) => {
     const dStr = `${year}-${pad(month+1)}-${pad(day)}`;
-    return teamLeaves.filter(l => {
+    return teamApprovedLeaves.filter(l => {
       const s = String(l.start).substring(0,10);
       const e = String(l.end||l.start).substring(0,10);
       return dStr >= s && dStr <= e;
@@ -4200,6 +4251,7 @@ function App() {
       // Update bankInfo and ptoHistory on refresh
       if (u.bankInfo !== undefined)   { setCurrentUser(prev=>({...prev, _bankInfo:u.bankInfo})); }
       if (u.ptoHistory !== undefined) { setCurrentUser(prev=>({...prev, _ptoHistory:u.ptoHistory})); }
+      if (u.teamLeaves !== undefined) { setCurrentUser(prev=>({...prev, _teamLeaves:u.teamLeaves})); }
       // Update perms from Sheet on refresh too
       if (u.adminPerms && Object.keys(u.adminPerms).length > 0) {
         const np = {};
@@ -4249,6 +4301,7 @@ function App() {
       // Store ptoHistory on the user object for the PTO page
       if (u.ptoHistory !== undefined) u._ptoHistory = u.ptoHistory;
       if (u.bankInfo !== undefined)   u._bankInfo   = u.bankInfo;
+      if (u.teamLeaves !== undefined) u._teamLeaves = u.teamLeaves;
       // Load all contractors - normalize roles
       if (u.allContractors !== undefined && u.allContractors.length > 0) {
         setContractors(u.allContractors.map(c=>({...c, role:normalizeRoleStr(c.role)})));
@@ -4334,7 +4387,7 @@ function App() {
     "c-pto":           <CPTOPage      contractor={contractor} setPage={setPage} leaves={leaves} ptoHistory={currentUser._ptoHistory||[]}/>,
     "c-leave":         <CLeave        user={currentUser} contractor={contractor} leaves={leaves} setLeaves={setLeaves} setContractors={setContractors} onContractorNotify={addNotification}/>,
     "c-announcements": <CAnnouncements announcements={announcements}/>,
-    "c-calendar":      <CLeaveCalendar contractor={contractor} leaves={leaves} contractors={contractors}/>,
+    "c-calendar":      <CLeaveCalendar contractor={contractor} leaves={leaves} contractors={contractors} teamLeaves={currentUser._teamLeaves||[]}/>,
   };
 
   const adminPages = {
