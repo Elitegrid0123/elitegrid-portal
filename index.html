@@ -48,7 +48,7 @@ const { useState, useRef, useEffect, useCallback } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwqGTML4O_iSWwJADay4ICorz0zC-NVdAGHBHUBqi3jItBrCDx3iDv1q1sq3iwFkeMD/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwprb8IWSA75fUSYiW6y3Q5lSJZJ0VF5E_JX1HO8myYBTwdCoIQfTyIv4oIQ5IrJ9Fg/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -89,21 +89,59 @@ function callScript(action, params, onSuccess, onError) {
     document.head.appendChild(script);
   };
 
-  // Photo uploads are too large for GET/JSONP. Send them with POST.
-  // Apps Script Web Apps do not reliably return CORS headers to GitHub Pages,
-  // so use no-cors and let the backend update Drive + the Sheet.
+  // Photo uploads are too large for GET/JSONP. From GitHub Pages, Apps Script
+  // does not expose CORS response headers, so use a hidden form POST instead of fetch.
+  // Browser form posts are allowed cross-origin and the Apps Script backend still saves
+  // the photo to Drive and updates the Contractors sheet.
   if (action === "uploadPhoto") {
-    fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      mode: "no-cors",
-      credentials: "omit",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action, ...params })
-    })
-      .then(() => {
-        if (onSuccess) onSuccess({ success:true, photoUrl:params.imageData || "", pendingDriveUrl:true });
-      })
-      .catch(() => { if (onError) onError("post_error"); });
+    const iframeName = "upload_iframe_" + Date.now();
+    const iframe = document.createElement("iframe");
+    iframe.name = iframeName;
+    iframe.style.display = "none";
+
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = APPS_SCRIPT_URL;
+    form.target = iframeName;
+    form.enctype = "application/x-www-form-urlencoded";
+    form.style.display = "none";
+
+    const addInput = (name, value) => {
+      const input = document.createElement("textarea");
+      input.name = name;
+      input.value = value == null ? "" : String(value);
+      form.appendChild(input);
+    };
+
+    addInput("action", action);
+    Object.keys(params || {}).forEach(k => addInput(k, params[k]));
+
+    let done = false;
+    const cleanup = () => {
+      setTimeout(() => {
+        try { form.remove(); } catch(e) {}
+        try { iframe.remove(); } catch(e) {}
+      }, 500);
+    };
+
+    const timeout = setTimeout(() => {
+      if (done) return;
+      done = true;
+      cleanup();
+      if (onError) onError("upload_timeout");
+    }, 90000);
+
+    iframe.onload = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeout);
+      cleanup();
+      if (onSuccess) onSuccess({ success:true, photoUrl:params.imageData || "", pendingDriveUrl:true });
+    };
+
+    document.body.appendChild(iframe);
+    document.body.appendChild(form);
+    form.submit();
     return;
   }
 
