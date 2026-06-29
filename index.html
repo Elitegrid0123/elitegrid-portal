@@ -48,7 +48,7 @@ const { useState, useRef, useEffect, useCallback } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwprb8IWSA75fUSYiW6y3Q5lSJZJ0VF5E_JX1HO8myYBTwdCoIQfTyIv4oIQ5IrJ9Fg/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwqGTML4O_iSWwJADay4ICorz0zC-NVdAGHBHUBqi3jItBrCDx3iDv1q1sq3iwFkeMD/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -89,10 +89,21 @@ function callScript(action, params, onSuccess, onError) {
     document.head.appendChild(script);
   };
 
-  // Photo uploads are large and Apps Script does not return CORS headers reliably.
-  // Use JSONP directly so the upload is not executed once by fetch and then again by fallback.
+  // Photo uploads are too large for GET/JSONP. Send them with POST.
+  // Apps Script Web Apps do not reliably return CORS headers to GitHub Pages,
+  // so use no-cors and let the backend update Drive + the Sheet.
   if (action === "uploadPhoto") {
-    runJSONP();
+    fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      mode: "no-cors",
+      credentials: "omit",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, ...params })
+    })
+      .then(() => {
+        if (onSuccess) onSuccess({ success:true, photoUrl:params.imageData || "", pendingDriveUrl:true });
+      })
+      .catch(() => { if (onError) onError("post_error"); });
     return;
   }
 
@@ -1161,7 +1172,14 @@ function CProfile({ contractor, setContractors, currentUser, setCurrentUser }) {
 
   const savePhoto = (url) => {
     setContractors(prev=>prev.map(ct=>ct.username===c.username?{...ct,photoUrl:url}:ct));
-    if (!DEMO_MODE) callScript("updateContractor",{username:c.username,photoUrl:url},()=>{},()=>{});
+    if (setCurrentUser) {
+      setCurrentUser(prev => prev ? { ...prev, photoUrl:url, profile:{ ...(prev.profile||{}), photoUrl:url } } : prev);
+    }
+    // If url is a data image, uploadPhoto already saved the real Drive URL in the Sheet.
+    // Do not call updateContractor here or it will overwrite the Drive URL with base64.
+    if (!DEMO_MODE && url && !String(url).startsWith("data:")) {
+      callScript("updateContractor",{username:c.username,photoUrl:url},()=>{},()=>{});
+    }
     setPhotoModal(false);
     toast("Profile photo updated ✓");
   };
