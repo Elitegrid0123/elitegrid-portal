@@ -48,7 +48,7 @@ const { useState, useRef, useEffect, useCallback } = React;
 // CONFIGURATION — UPDATE THESE TWO LINES BEFORE GOING LIVE
 // See SETUP-GUIDE.txt Step 3 for instructions
 // ════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwprb8IWSA75fUSYiW6y3Q5lSJZJ0VF5E_JX1HO8myYBTwdCoIQfTyIv4oIQ5IrJ9Fg/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzY9xpG5q88azpdOD-yqZy5VNzM94VLguy8fufoNIAaJY27-k-4SW0wIjCDyGgOlNJ7/exec";
 const DEMO_MODE       = false;
 // ════════════════════════════════════════════════════════
 
@@ -94,7 +94,8 @@ function callScript(action, params, onSuccess, onError) {
   // Browser form posts are allowed cross-origin and the Apps Script backend still saves
   // the photo to Drive and updates the Contractors sheet.
   if (action === "uploadPhoto") {
-    const iframeName = "upload_iframe_" + Date.now();
+    const uploadId = "up_" + Date.now() + "_" + Math.random().toString(36).slice(2);
+    const iframeName = "upload_iframe_" + uploadId;
     const iframe = document.createElement("iframe");
     iframe.name = iframeName;
     iframe.style.display = "none";
@@ -114,10 +115,12 @@ function callScript(action, params, onSuccess, onError) {
     };
 
     addInput("action", action);
+    addInput("_egUploadId", uploadId);
     Object.keys(params || {}).forEach(k => addInput(k, params[k]));
 
     let done = false;
     const cleanup = () => {
+      window.removeEventListener("message", onMessage);
       setTimeout(() => {
         try { form.remove(); } catch(e) {}
         try { iframe.remove(); } catch(e) {}
@@ -131,14 +134,22 @@ function callScript(action, params, onSuccess, onError) {
       if (onError) onError("upload_timeout");
     }, 90000);
 
-    iframe.onload = () => {
+    function onMessage(ev) {
+      const msg = ev && ev.data;
+      if (!msg || msg.type !== "elitegrid_uploadPhoto" || msg.uploadId !== uploadId) return;
       if (done) return;
       done = true;
       clearTimeout(timeout);
       cleanup();
-      if (onSuccess) onSuccess({ success:true, photoUrl:params.imageData || "", pendingDriveUrl:true });
-    };
+      const result = msg.result || {};
+      if (result.success) {
+        if (onSuccess) onSuccess(result);
+      } else {
+        if (onError) onError(result.error || "upload_failed");
+      }
+    }
 
+    window.addEventListener("message", onMessage);
     document.body.appendChild(iframe);
     document.body.appendChild(form);
     form.submit();
